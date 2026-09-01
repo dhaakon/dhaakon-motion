@@ -30,16 +30,29 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/react.tsx
 var react_exports = {};
 __export(react_exports, {
+  Cue: () => Cue,
+  Marker: () => Marker,
   Motion: () => Motion,
   MotionConfig: () => MotionConfig,
+  Region: () => Region,
   Reveal: () => Reveal,
+  Sequence: () => Sequence,
+  Track: () => Track,
+  Transport: () => Transport,
+  Tween: () => Tween,
   createMotionComponent: () => createMotionComponent,
   motion: () => motion,
+  useCue: () => useCue,
   useInView: () => useInView,
   useMotionValue: () => useMotionValue,
   useMotionValueState: () => useMotionValueState,
+  usePlayhead: () => usePlayhead,
+  usePlayheadValue: () => usePlayheadValue,
   useReducedMotion: () => useReducedMotion,
+  useSceneState: () => useSceneState,
   useTimeline: () => useTimeline,
+  useTransport: () => useTransport,
+  useTransportState: () => useTransportState,
   useTween: () => useTween
 });
 module.exports = __toCommonJS(react_exports);
@@ -187,18 +200,299 @@ var motion = new Proxy({}, { get: (_, tag) => {
 function Reveal({ from = { y: 28, opacity: 0 }, to = { y: 0, opacity: 1 }, once = true, amount = "some", margin = "0px 0px -8% 0px", ...props }) {
   return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(motion.div, { ...props, initial: from, whileInView: to, viewport: { once, amount, margin } });
 }
+var SequenceContext = (0, import_react.createContext)(null);
+var TransportContext = (0, import_react.createContext)(null);
+function requireSequence(componentName) {
+  const value = (0, import_react.useContext)(SequenceContext);
+  if (!value) throw new Error(`<${componentName}> (or use${componentName}()) must be used inside <Transport>, directly or nested inside a <Sequence>.`);
+  return value;
+}
+function createSequenceValue(timeline, onRebuilt) {
+  const items = /* @__PURE__ */ new Map();
+  const cues = /* @__PURE__ */ new Map();
+  const markers = /* @__PURE__ */ new Map();
+  const regions = /* @__PURE__ */ new Map();
+  let orderCounter = 0;
+  let scheduled = false;
+  const rebuild = () => {
+    timeline.clear();
+    const sorted = [...items.values()].sort((a, b) => a.order - b.order);
+    for (const entry of sorted) timeline.add(entry.item, entry.at);
+    for (const marker of markers.values()) timeline.marker(marker.name, marker.at, marker.options);
+    for (const cue of cues.values()) timeline.cue(cue.name, cue.at, cue.handler, cue.options);
+    for (const region of regions.values()) timeline.region(region.name, region.from, region.to, region.options);
+    onRebuilt();
+  };
+  const invalidate = () => {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(() => {
+      scheduled = false;
+      rebuild();
+    });
+  };
+  return {
+    timeline,
+    register(key, item, at) {
+      const existing = items.get(key);
+      items.set(key, { item, at, order: existing?.order ?? orderCounter++ });
+      invalidate();
+    },
+    unregister(key) {
+      if (items.delete(key)) invalidate();
+    },
+    registerCue(key, spec) {
+      cues.set(key, spec);
+      invalidate();
+    },
+    unregisterCue(key) {
+      if (cues.delete(key)) invalidate();
+    },
+    registerMarker(key, spec) {
+      markers.set(key, spec);
+      invalidate();
+    },
+    unregisterMarker(key) {
+      if (markers.delete(key)) invalidate();
+    },
+    registerRegion(key, spec) {
+      regions.set(key, spec);
+      invalidate();
+    },
+    unregisterRegion(key) {
+      if (regions.delete(key)) invalidate();
+    },
+    invalidate
+  };
+}
+function Transport(props) {
+  const reduced = useReducedMotion();
+  const respect = props.respectReducedMotion !== false;
+  const ownsInstance = (0, import_react.useRef)(false);
+  const instanceRef = (0, import_react.useRef)(null);
+  if (!instanceRef.current) {
+    if (props.transport) {
+      instanceRef.current = props.transport;
+      ownsInstance.current = false;
+    } else {
+      instanceRef.current = new import_motion.Transport({ frameRate: props.frameRate, snap: props.snap, rate: props.rate, loop: props.loop, clock: props.clock, scheduler: props.scheduler });
+      ownsInstance.current = true;
+    }
+  }
+  const transport = instanceRef.current;
+  (0, import_react.useEffect)(() => () => {
+    if (ownsInstance.current) transport.dispose();
+  }, [transport]);
+  (0, import_react.useEffect)(() => {
+    const detachers = (props.outputs ?? []).map((output) => transport.attach(output));
+    return () => {
+      detachers.forEach((detach) => detach());
+    };
+  }, [transport, stableKey(props.outputs?.map((o) => o.name))]);
+  const onStateChangeRef = (0, import_react.useRef)(props.onStateChange);
+  onStateChangeRef.current = props.onStateChange;
+  (0, import_react.useEffect)(() => transport.attach({ onStateChange: (state) => onStateChangeRef.current?.(state) }), [transport]);
+  const onFinishRef = (0, import_react.useRef)(props.onFinish);
+  onFinishRef.current = props.onFinish;
+  (0, import_react.useEffect)(() => {
+    let cancelled = false;
+    transport.finished.then(() => {
+      if (!cancelled) onFinishRef.current?.();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [transport, transport.state]);
+  const controlled = props.paused !== void 0;
+  const shouldRun = (props.autoplay || controlled) && props.paused !== true && !(respect && reduced);
+  (0, import_react.useEffect)(() => {
+    if (!props.autoplay && !controlled) return;
+    if (respect && reduced) {
+      transport.seek(transport.duration);
+      return;
+    }
+    if (shouldRun) {
+      for (const output of props.outputs ?? []) output.unlock?.();
+      transport.play();
+    } else {
+      transport.pause();
+    }
+  }, [transport, shouldRun, respect, reduced]);
+  const sequenceValue = (0, import_react.useMemo)(
+    () => createSequenceValue(transport.root, () => transport.seek(transport.time, { cues: "skip" })),
+    [transport]
+  );
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TransportContext.Provider, { value: transport, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SequenceContext.Provider, { value: sequenceValue, children: props.children }) });
+}
+function useTransport() {
+  const transport = (0, import_react.useContext)(TransportContext);
+  if (!transport) throw new Error("useTransport() must be called inside <Transport>.");
+  return transport;
+}
+function useTransportState() {
+  const transport = useTransport();
+  const snapshotRef = (0, import_react.useRef)({ state: transport.state, rate: transport.rate, duration: transport.duration, frameRate: transport.frameRate });
+  const getSnapshot = () => {
+    const prev = snapshotRef.current;
+    if (prev.state !== transport.state || prev.rate !== transport.rate || prev.duration !== transport.duration || prev.frameRate !== transport.frameRate) {
+      snapshotRef.current = { state: transport.state, rate: transport.rate, duration: transport.duration, frameRate: transport.frameRate };
+    }
+    return snapshotRef.current;
+  };
+  return (0, import_react.useSyncExternalStore)(
+    (listener) => transport.attach({ onStateChange: () => listener(), onRateChange: () => listener() }),
+    getSnapshot,
+    getSnapshot
+  );
+}
+function usePlayhead(options = {}) {
+  const transport = useTransport();
+  const fps = Math.max(1, options.fps ?? 30);
+  const [snapshot, setSnapshot] = (0, import_react.useState)(() => ({ time: transport.time, frame: transport.frame, timecode: transport.timecode, progress: transport.progress }));
+  (0, import_react.useEffect)(() => {
+    const minInterval = 1e3 / fps;
+    let last = 0;
+    return transport.subscribe(() => {
+      const now = globalThis.performance?.now?.() ?? Date.now();
+      if (now - last < minInterval) return;
+      last = now;
+      setSnapshot({ time: transport.time, frame: transport.frame, timecode: transport.timecode, progress: transport.progress });
+    });
+  }, [transport, fps]);
+  return snapshot;
+}
+function usePlayheadValue() {
+  const transport = useTransport();
+  const motionValue = useMotionValue(transport.time);
+  (0, import_react.useEffect)(() => transport.subscribe((info) => motionValue.set(info.time)), [transport, motionValue]);
+  return motionValue;
+}
+function useCue(at, handler, deps = []) {
+  const parent = requireSequence("Cue");
+  const id = (0, import_react.useId)();
+  const handlerRef = (0, import_react.useRef)(handler);
+  handlerRef.current = handler;
+  const stableHandler = (0, import_react.useRef)((e) => handlerRef.current(e)).current;
+  (0, import_react.useLayoutEffect)(() => {
+    parent.registerCue(id, { name: id, at, handler: stableHandler });
+    return () => parent.unregisterCue(id);
+  }, [parent, id, stableKey(at), ...deps]);
+}
+function Track({ target, keyframes, at, ...options }) {
+  const parent = requireSequence("Track");
+  const id = (0, import_react.useId)();
+  const key = `${stableKey(keyframes)}:${stableKey(options)}`;
+  const built = (0, import_react.useRef)(null);
+  if (!built.current || built.current.key !== key) {
+    const item = target instanceof import_motion.MotionValue ? new import_motion.Track({ ...options, keyframes, target }) : new import_motion.Track({ ...options, keyframes, apply: target });
+    built.current = { item, key };
+  }
+  (0, import_react.useLayoutEffect)(() => {
+    parent.register(id, built.current.item, at);
+    return () => parent.unregister(id);
+  }, [parent, id, stableKey(at), key]);
+  return null;
+}
+function Tween({ target, from, to, at, ...options }) {
+  const parent = requireSequence("Tween");
+  const id = (0, import_react.useId)();
+  const key = `${stableKey(from)}:${stableKey(to)}:${stableKey(options)}`;
+  const built = (0, import_react.useRef)(null);
+  if (!built.current || built.current.key !== key) {
+    const write = target instanceof import_motion.MotionValue ? (value) => target.set(value) : target;
+    built.current = { item: new import_motion.Tween({ ...options, from, to, onUpdate: (value) => write(value) }), key };
+  }
+  (0, import_react.useLayoutEffect)(() => {
+    parent.register(id, built.current.item, at);
+    return () => parent.unregister(id);
+  }, [parent, id, stableKey(at), key]);
+  return null;
+}
+function Marker({ name, at, color, payload }) {
+  const parent = requireSequence("Marker");
+  const id = (0, import_react.useId)();
+  (0, import_react.useLayoutEffect)(() => {
+    parent.registerMarker(id, { name, at, options: { color, payload } });
+    return () => parent.unregisterMarker(id);
+  }, [parent, id, name, stableKey(at), color, stableKey(payload)]);
+  return null;
+}
+function Cue({ name, at, onFire, payload, once }) {
+  const parent = requireSequence("Cue");
+  const id = (0, import_react.useId)();
+  const handlerRef = (0, import_react.useRef)(onFire);
+  handlerRef.current = onFire;
+  const stableHandler = (0, import_react.useRef)((e) => handlerRef.current(e)).current;
+  (0, import_react.useLayoutEffect)(() => {
+    parent.registerCue(id, { name, at, handler: stableHandler, options: { payload, once } });
+    return () => parent.unregisterCue(id);
+  }, [parent, id, name, stableKey(at), stableKey(payload), once]);
+  return null;
+}
+function Region({ name, from, to, onEnter, onExit, payload, once }) {
+  const parent = requireSequence("Region");
+  const id = (0, import_react.useId)();
+  const enterRef = (0, import_react.useRef)(onEnter);
+  enterRef.current = onEnter;
+  const exitRef = (0, import_react.useRef)(onExit);
+  exitRef.current = onExit;
+  const stableEnter = (0, import_react.useRef)((e) => enterRef.current?.(e)).current;
+  const stableExit = (0, import_react.useRef)((e) => exitRef.current?.(e)).current;
+  (0, import_react.useLayoutEffect)(() => {
+    parent.registerRegion(id, { name, from, to, options: { payload, once, onEnter: stableEnter, onExit: stableExit } });
+    return () => parent.unregisterRegion(id);
+  }, [parent, id, name, stableKey(from), stableKey(to), stableKey(payload), once]);
+  return null;
+}
+function Sequence({ name, at, repeat, repeatDelay, yoyo, frameRate, snap, onComplete, children }) {
+  const parent = requireSequence("Sequence");
+  const id = (0, import_react.useId)();
+  const timelineRef = (0, import_react.useRef)(null);
+  if (!timelineRef.current) timelineRef.current = new import_motion.Timeline({ name, repeat, repeatDelay, yoyo, frameRate, snap, onComplete });
+  const timeline = timelineRef.current;
+  const valueRef = (0, import_react.useRef)(null);
+  if (!valueRef.current) valueRef.current = createSequenceValue(timeline, () => parent.invalidate());
+  (0, import_react.useLayoutEffect)(() => {
+    parent.register(id, timeline, at);
+    return () => parent.unregister(id);
+  }, [parent, id, stableKey(at)]);
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SequenceContext.Provider, { value: valueRef.current, children });
+}
+function useSceneState(targets) {
+  const [state, setState] = (0, import_react.useState)(() => (0, import_motion.captureScene)(targets));
+  const targetsRef = (0, import_react.useRef)(targets);
+  targetsRef.current = targets;
+  const set = (next, transition) => {
+    (0, import_motion.applyScene)(next, targetsRef.current, transition ? { transition } : void 0);
+    setState((prev) => ({ ...prev, ...next }));
+  };
+  return [state, set];
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  Cue,
+  Marker,
   Motion,
   MotionConfig,
+  Region,
   Reveal,
+  Sequence,
+  Track,
+  Transport,
+  Tween,
   createMotionComponent,
   motion,
+  useCue,
   useInView,
   useMotionValue,
   useMotionValueState,
+  usePlayhead,
+  usePlayheadValue,
   useReducedMotion,
+  useSceneState,
   useTimeline,
+  useTransport,
+  useTransportState,
   useTween
 });
 //# sourceMappingURL=react.cjs.map
