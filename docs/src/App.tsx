@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import type { ChangeEvent } from 'react';
 import { Badge, Button } from '@dhaakon/ui';
-import { Timeline, Tween, scheduler } from '@dhaakon/motion';
+import { Timeline, Tween, Transport, scheduler, loadSheet, validateSheet, frameRate, frameToMs } from '@dhaakon/motion';
 import { Motion, MotionConfig, Reveal, motion, useInView, useMotionValue, useMotionValueState } from '@dhaakon/motion/react';
 
 const ThreeShowcase = lazy(() => import('./ThreeShowcase').then((module) => ({ default: module.ThreeShowcase })));
@@ -179,6 +180,29 @@ function ThreeProductionSequence() {
   return <canvas ref={canvas} />;
 }`;
 
+const transportCode = `import { Timeline, Tween, Transport } from '@dhaakon/motion';
+
+const show = new Timeline({ frameRate: 24 })
+  .add(titleTween, 0)
+  .add(bodyTween, '14f')
+  .cue('flash', '46f', () => flashLight());
+
+const transport = new Transport({ root: show, frameRate: 24, loop: true });
+transport.play();
+transport.step(1);                 // ±1 frame
+transport.seek('00:00:01:12');     // any timecode, '12f', '1.5s', or ms
+transport.subscribe((info) => { clock.textContent = info.timecode; });`;
+
+const sheetCode = `import { loadSheet, validateSheet } from '@dhaakon/motion';
+
+const { ok, errors } = validateSheet(json);
+if (!ok) throw new Error(errors[0].message);
+
+const timeline = loadSheet(json, {
+  targets: { x: (value) => (box.style.transform = \`translateX(\${value}px)\`) },
+});
+timeline.toAscii(); // a stable text rendering of the tree`;
+
 function Code({ children }: { children: string }) {
   const [copied, setCopied] = useState(false);
   return <div className="code"><button onClick={() => { navigator.clipboard?.writeText(children); setCopied(true); setTimeout(() => setCopied(false), 1200); }}>{copied ? 'COPIED' : 'COPY'}</button><pre><code>{children}</code></pre></div>;
@@ -287,6 +311,114 @@ function CanvasSignalExample() {
   return <div className="canvas-example"><canvas ref={canvas} role="img"/><Button variant="outline" size="sm" onClick={play}>Restart signal ↻</Button></div>;
 }
 
+function TransportScrubberExample() {
+  const rowsRef = useRef<Array<HTMLDivElement | null>>([]);
+  const flashRef = useRef<HTMLElement | null>(null);
+  const clockRef = useRef<HTMLElement | null>(null);
+  const scrubRef = useRef<HTMLInputElement | null>(null);
+  const transportRef = useRef<Transport | null>(null);
+  const [playing, setPlaying] = useState(true);
+
+  useEffect(() => {
+    // Tween's own duration/delay are still plain ms (only Timeline positions and Track keyframes
+    // resolve frame/timecode literals), so a frame count is converted here with the same rate the
+    // Timeline itself uses.
+    const rate = frameRate(24);
+    const labels = ['OPEN', 'KEY', 'ROLL'];
+    const timeline = new Timeline({ frameRate: 24, name: 'scrub' });
+    labels.forEach((_, index) => {
+      const tween = new Tween<{ x: number; opacity: number }>({
+        from: { x: -70, opacity: 0 }, to: { x: 0, opacity: 1 }, duration: frameToMs(18, rate), easing: 'dhaakon',
+        onUpdate: ({ x, opacity }) => { const node = rowsRef.current[index]; if (node) { node.style.transform = `translateX(${x}px)`; node.style.opacity = String(opacity); } },
+      });
+      timeline.add(tween, index === 0 ? 0 : `${index * 14}f`);
+    });
+    timeline.cue('flash', '46f', () => {
+      const node = flashRef.current; if (!node) return;
+      node.classList.add('flash-on'); setTimeout(() => node.classList.remove('flash-on'), 220);
+    });
+    const transport = new Transport({ root: timeline, frameRate: 24, loop: true });
+    transportRef.current = transport;
+    const unsubscribe = transport.subscribe((info) => {
+      if (clockRef.current) clockRef.current.textContent = info.timecode;
+      if (scrubRef.current && document.activeElement !== scrubRef.current) {
+        const duration = transport.duration;
+        scrubRef.current.value = String(duration ? Math.round((info.time / duration) * 1000) : 0);
+      }
+    });
+    transport.play();
+    return () => { unsubscribe(); transport.dispose(); };
+  }, []);
+
+  const toggle = () => { const t = transportRef.current; if (!t) return; t.toggle(); setPlaying(t.state === 'playing'); };
+  const scrub = (event: ChangeEvent<HTMLInputElement>) => {
+    const t = transportRef.current; if (!t) return;
+    t.seek((Number(event.target.value) / 1000) * t.duration);
+  };
+
+  return <div className="cue-example transport-example">
+    <div className="cue-head"><span>TRANSPORT / 24 FPS</span><i ref={flashRef} className="flash-dot" /><strong ref={clockRef}>00:00:00:00</strong></div>
+    <div className="cue-stack">{['OPEN', 'KEY', 'ROLL'].map((label, index) => <div className="cue-row" key={label} ref={(node) => { rowsRef.current[index] = node; }}><small>0{index + 1}</small><b>{label}</b><span>frame {index * 14}</span><i /></div>)}</div>
+    <input ref={scrubRef} className="transport-scrub" type="range" min={0} max={1000} defaultValue={0} onChange={scrub} aria-label="Scrub the transport" />
+    <div className="button-row">
+      <Button variant="outline" size="sm" onClick={() => transportRef.current?.step(-1)}>⏮ frame</Button>
+      <Button variant="outline" size="sm" onClick={toggle}>{playing ? 'Pause ⏸' : 'Play ▶'}</Button>
+      <Button variant="outline" size="sm" onClick={() => transportRef.current?.step(1)}>frame ⏭</Button>
+    </div>
+  </div>;
+}
+
+const sheetSource = `{
+  "$schema": "dhaakon-motion/cue-sheet/1",
+  "frameRate": 24,
+  "markers": [{ "name": "verse", "at": "1s" }],
+  "cues": [{ "name": "blackout", "at": "verse+=12f" }],
+  "items": [
+    { "type": "tween", "target": "x", "at": 0, "duration": "24f", "easing": "dhaakon", "from": 0, "to": 220 }
+  ]
+}`;
+
+function CueSheetExample() {
+  const [source, setSource] = useState(sheetSource);
+  const [ascii, setAscii] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const transportRef = useRef<Transport | null>(null);
+
+  const load = () => {
+    transportRef.current?.dispose();
+    try {
+      const parsed = JSON.parse(source);
+      const validated = validateSheet(parsed);
+      if (!validated.ok) { setError(validated.errors.map((e) => `${e.path}: ${e.message}`).join('\n')); return; }
+      const timeline = loadSheet(validated.sheet, {
+        targets: { x: (value: number) => { if (boxRef.current) boxRef.current.style.transform = `translateX(${value}px)`; } },
+      }, { strict: false });
+      setAscii(timeline.toAscii());
+      setError(null);
+      const duration = Number.isFinite(timeline.totalDuration) ? timeline.totalDuration : timeline.duration;
+      const transport = new Transport({ root: timeline, duration });
+      transportRef.current = transport;
+      transport.play();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  useEffect(() => { load(); return () => transportRef.current?.dispose(); }, []);
+
+  return <div className="sheet-example">
+    <div className="sheet-body">
+      <textarea className="sheet-textarea" value={source} onChange={(event) => setSource(event.target.value)} spellCheck={false} />
+      <div className="sheet-preview">
+        <div className="sheet-stage"><div ref={boxRef} className="sheet-block" /></div>
+        {error ? <pre className="sheet-error">{error}</pre> : <pre className="sheet-ascii">{ascii}</pre>}
+      </div>
+    </div>
+    <Button variant="accent" size="sm" onClick={load}>Load sheet ▸</Button>
+  </div>;
+}
+
 function ComplexExample({ number, title, description, code, delay = 0, children }: { number: string; title: string; description: string; code: string; delay?: number; children: React.ReactNode }) {
   return <Reveal as="article" className="complex-example" from={{ y: 38, opacity: 0 }} amount={0.08} transition={{ duration: 600, delay }}><header><span>[ {number} ]</span><h3>{title}</h3><p>{description}</p><Badge tone="accent">React + TypeScript</Badge></header><div className="complex-body"><div className="complex-live">{children}</div><Code>{code}</Code></div></Reveal>;
 }
@@ -322,7 +454,7 @@ export function App({ version }: { version: string }) {
   }, []);
 
   return <MotionConfig transition={{ duration: 360, easing: 'dhaakon' }}>
-    <motion.header className="site-head" initial={{ y: -18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 440 }}><a className="wordmark" href="#top"><i>◇</i> DHAAKON / MOTION</a><nav><a href="#why">Why</a><a href="#playground">Playground</a><a href="#react">React</a><a href="#compositions">Compositions</a><a href="#three">Three.js</a><a href="#api">API</a></nav><Badge tone="accent">v{version}</Badge></motion.header>
+    <motion.header className="site-head" initial={{ y: -18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 440 }}><a className="wordmark" href="#top"><i>◇</i> DHAAKON / MOTION</a><nav><a href="#why">Why</a><a href="#playground">Playground</a><a href="#react">React</a><a href="#compositions">Compositions</a><a href="#three">Three.js</a><a href="#transport">Transport</a><a href="#api">API</a></nav><Badge tone="accent">v{version}</Badge></motion.header>
     <main id="top">
       <section className="hero"><div className="hero-copy"><motion.p className="eyebrow" initial={{ y: 16, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 100 }}>[ MOTION SYSTEM 02 ] · BUILT FROM DHAAK-ANIM</motion.p><motion.h1 initial={{ y: 28, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 160 }}>Movement with<br/><em>direction.</em></motion.h1><motion.p className="lead" initial={{ y: 22, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 240 }}>A compact tween engine for interfaces, timelines, canvas, and React compositions. One frame loop. Zero core dependencies.</motion.p><motion.div className="install" initial={{ y: 18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 320 }}><code>npm i @dhaakon/motion</code><span>↗ VERDACCIO :21760</span></motion.div></div><HeroOrbit /></section>
       <section className="metrics">{[['1','shared frame loop'],['0','core dependencies'],['2','entry points'],[String(scheduler.size),'active right now']].map(([value,label], index) => <Reveal as="div" key={label} from={{ y: 20, opacity: 0 }} transition={{ delay: index * 65 }}><strong>{value}</strong><span>{label}</span></Reveal>)}</section>
@@ -331,7 +463,8 @@ export function App({ version }: { version: string }) {
       <section className="section inverse" id="react"><SectionTitle number="03" title="React, composed" subtitle="Declarative when it helps. Imperative at the frame boundary."/><div className="demo-grid"><RevealCell delay={0}><ReactComposition/></RevealCell><RevealCell delay={90}><RenderPropDemo/></RevealCell></div><div className="code-grid"><CodePanel><h3>DOM composition</h3><p>Use <code>motion.*</code> for transform and style animation without a React render on every frame.</p><Code>{reactCode}</Code></CodePanel><CodePanel delay={100}><h3>Reveal on scroll</h3><p><code>Reveal</code>, <code>whileInView</code>, and <code>useInView</code> share the same observer and respect reduced-motion preferences.</p><Code>{revealCode}</Code></CodePanel></div></section>
       <section className="section compositions-section" id="compositions"><SectionTitle number="04" title="Production compositions" subtitle="Complete patterns for cueing, application state, and non-DOM render targets."/><div className="complex-stack"><ComplexExample number="04.1" title="Overlapping cue stack" description="A labeled Timeline drives four technical-direction cues from one deterministic clock. Replay, pause, seek, or reverse the entire stack as a unit." code={cueReactCode}><CueSequenceExample/></ComplexExample><ComplexExample number="04.2" title="State-driven scene" description="React owns the semantic state while motion interpolates between rehearsal, preview, and live visual states without remounting the composition." code={stateReactCode}><SceneStateExample/></ComplexExample><ComplexExample number="04.3" title="Canvas signal renderer" description="A MotionValue feeds a custom canvas renderer directly. React mounts the composition; the shared frame loop handles every subsequent draw." code={canvasReactCode}><CanvasSignalExample/></ComplexExample></div></section>
       <section className="section three-section" id="three"><SectionTitle number="05" title="One clock. Every property." subtitle="A live Three.js production sequence driven by the same renderer-agnostic values used everywhere else."/><Reveal className="three-shell" from={{ y: 42, opacity: 0 }} amount={0.08} transition={{ duration: 700 }}><DeferredThreeShowcase/></Reveal><div className="three-explain"><Reveal className="three-copy" from={{ x: -28, opacity: 0 }}><p className="eyebrow">[ REACT × MOTION × THREE.JS ]</p><h3>This is not a spinning-cube demo.</h3><p>One 9.2-second timeline interpolates deeply nested objects and writes them directly into the Three.js scene graph. It coordinates the camera, focal length, scene transforms, procedural shader uniforms, colors, three light rigs, fog density, tone-mapping exposure, 2,200 particles, orbital geometry, and the HTML telemetry overlay.</p><p>React mounts the renderer and owns the controls. It does not rerender at 60fps. Dhaakon Motion advances one deterministic clock, and Three.js renders once after every group of property writes.</p><div className="channel-grid">{[['01','Camera','position · target · FOV · roll'],['02','Scene graph','position · rotation · scale'],['03','GPU shader','time · energy · two colors'],['04','Lighting','color · intensity · exposure · fog'],['05','Particles','size · opacity · transform'],['06','Interface','phase · clock · scrubber · telemetry']].map(([number,title,properties]) => <div key={title}><span>{number}</span><b>{title}</b><small>{properties}</small></div>)}</div></Reveal><CodePanel delay={100}><h3>React renderer binding</h3><p>A <code>MotionValue</code> subscription is the adapter. No Three.js-specific API is required inside the engine.</p><Code>{threeReactCode}</Code></CodePanel></div></section>
-      <section className="section" id="api"><SectionTitle number="06" title="Small surface, deep control" subtitle="Every primitive can be used alone or nested into a composition."/><div className="api-grid"><Api index={0} name="Tween" text="Play, pause, stop, cancel, reverse, seek, repeat, yoyo, delay, and await finished."/><Api index={1} name="Timeline" text="Sequence or overlap tweens with milliseconds, labels, <, >, and relative offsets."/><Api index={2} name="MotionValue" text="Observable animation state for React, canvas, WebGL, audio, and custom renderers."/><Api index={3} name="motion.*" text="Typed React elements with animate, whileInView, viewport, and reduced-motion handling."/><Api index={4} name="interpolate" text="Numbers, unit strings, colors, arrays, and deeply nested objects."/><Api index={5} name="FrameScheduler" text="One requestAnimationFrame for every active tween; injectable for deterministic tests."/></div><div className="code-grid"><CodePanel><Code>{tweenCode}</Code></CodePanel><CodePanel delay={100}><Code>{timelineCode}</Code></CodePanel></div></section>
+      <section className="section transport-section" id="transport"><SectionTitle number="06" title="One clock, every render target" subtitle="Timecode, nested cue timelines, and cue sheets that round-trip through plain JSON."/><div className="complex-stack"><ComplexExample number="06.1" title="Transport &amp; timecode" description="A Transport drives a nested Timeline at 24fps. Scrub, step a frame at a time, or let it loop — the SMPTE readout and a cue flash come from the same clock a renderer would attach to." code={transportCode}><TransportScrubberExample/></ComplexExample><ComplexExample number="06.2" title="Cue sheet, live" description="Edit the JSON and reload it: validateSheet checks it, loadSheet builds a live Timeline bound to a target, and toAscii() renders the tree as text — the same inspection a test failure or a devtools overlay would show." code={sheetCode}><CueSheetExample/></ComplexExample></div></section>
+      <section className="section" id="api"><SectionTitle number="07" title="Small surface, deep control" subtitle="Every primitive can be used alone or nested into a composition."/><div className="api-grid"><Api index={0} name="Tween" text="Play, pause, stop, cancel, reverse, seek, repeat, yoyo, delay, and await finished."/><Api index={1} name="Timeline" text="Nests, sequences, or overlaps items with milliseconds, labels, timecodes, <, >, and relative offsets."/><Api index={2} name="Transport" text="The clock authority: rate, loop, chase(), and any number of attached outputs."/><Api index={3} name="Track" text="N-keyframe animation with per-segment easing — the general form of a two-key Tween."/><Api index={4} name="MotionValue" text="Observable animation state for React, canvas, WebGL, audio, and custom renderers."/><Api index={5} name="motion.*" text="Typed React elements with animate, whileInView, viewport, and reduced-motion handling."/><Api index={6} name="interpolate" text="Numbers, unit strings, colors, arrays, and deeply nested objects."/><Api index={7} name="loadSheet" text="Builds a live Timeline from a JSON cue sheet, with named target bindings and validation."/><Api index={8} name="FrameScheduler" text="One requestAnimationFrame for every active tween; injectable for deterministic tests."/></div><div className="code-grid"><CodePanel><Code>{tweenCode}</Code></CodePanel><CodePanel delay={100}><Code>{timelineCode}</Code></CodePanel></div></section>
       <section className="principles"><Reveal className="principles-label" from={{ x: -24, opacity: 0 }}><p className="eyebrow">[ OPERATING PRINCIPLES ]</p></Reveal><div>{['Motion clarifies state.','Composition beats choreography.','Reduced motion is a first-class mode.'].map((line,index) => <Reveal key={line} from={{ x: 32, opacity: 0 }} transition={{ delay: index * 90 }}><h2>{line}</h2></Reveal>)}</div></section>
     </main>
     <footer><span>◇ DHAAKON MOTION</span><span>MIT · TYPESCRIPT · REACT 18/19</span><a href="http://dhaakon-ubuntu:21724/dhaakon-ubuntu/dhaakon-motion">SOURCE ↗</a></footer>
