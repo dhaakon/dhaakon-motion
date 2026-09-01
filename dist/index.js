@@ -544,126 +544,6 @@ var Tween = class {
     });
   }
 };
-var TIME_LITERAL_RE = /^-?\d+(?:\.\d+)?(?:f|s|ms)$|^\d{1,2}:\d{2}:\d{2}[:;]\d{1,2}$/i;
-var ANCHOR_RE = /^([<>])(?:([+-]=)(.+))?$/;
-var LABEL_OFFSET_RE = /^(.+?)([+-]=)(.+)$/;
-var Timeline = class {
-  entries = [];
-  labels = /* @__PURE__ */ new Map();
-  cursor = 0;
-  driver;
-  options;
-  rateInput;
-  constructor(options = {}) {
-    this.options = options;
-    this.rateInput = options.frameRate;
-    this.driver = new Tween({
-      from: 0,
-      to: 0,
-      duration: 0,
-      easing: "linear",
-      repeat: options.repeat,
-      yoyo: options.yoyo,
-      scheduler: options.scheduler,
-      onUpdate: (time) => this.render(time),
-      onComplete: () => options.onComplete?.()
-    });
-    if (options.autoplay) queueMicrotask(() => this.play());
-  }
-  get duration() {
-    return this.cursor;
-  }
-  get state() {
-    return this.driver.state;
-  }
-  get finished() {
-    return this.driver.finished;
-  }
-  /** The timeline's own frame rate (default 60 fps), used for `.frames`, `.timecode()`, `snap`, and frame/timecode positions. */
-  get frameRate() {
-    return frameRate(this.rateInput ?? 60);
-  }
-  get frames() {
-    return msToFrame(this.duration, this.frameRate);
-  }
-  timecode(ms = this.duration) {
-    return msToTimecode(ms, this.frameRate);
-  }
-  label(name, at = this.cursor) {
-    this.labels.set(name, this.resolvePosition(at, this.entries.at(-1)));
-    return this;
-  }
-  add(tween, at) {
-    const previous = this.entries.at(-1);
-    const start = this.resolvePosition(at, previous);
-    const end = start + tween.totalDuration;
-    this.entries.push({ tween, start, end });
-    this.cursor = Math.max(this.cursor, end);
-    return this;
-  }
-  addTween(tween, at) {
-    return this.add(tween, at);
-  }
-  addTweens(tweens) {
-    tweens.forEach((tween) => this.add(tween));
-    return this;
-  }
-  play() {
-    const playback = { from: 0, to: this.duration, duration: this.duration };
-    if (this.options.repeat != null) playback.repeat = this.options.repeat;
-    if (this.options.yoyo != null) playback.yoyo = this.options.yoyo;
-    this.driver.configure(playback).play();
-    return this;
-  }
-  start() {
-    return this.play();
-  }
-  pause() {
-    this.driver.pause();
-    return this;
-  }
-  stop() {
-    this.driver.stop();
-    this.render(0);
-    return this;
-  }
-  reverse() {
-    this.driver.reverse();
-    return this;
-  }
-  seek(progress) {
-    this.driver.seek(progress);
-    return this;
-  }
-  loop(value = true) {
-    this.driver.repeat = value ? Infinity : 0;
-    return this;
-  }
-  render(time) {
-    const sampled = this.options.snap ? snapToFrame(time, this.frameRate) : time;
-    for (const entry of this.entries) entry.tween.sampleAt(sampled - entry.start);
-    this.options.onUpdate?.(sampled, this.duration ? sampled / this.duration : 1);
-  }
-  resolvePosition(at, previous) {
-    if (at == null) return previous?.end ?? 0;
-    if (typeof at === "number") return Math.max(0, at);
-    const text = at.trim();
-    const anchorMatch = text.match(ANCHOR_RE);
-    if (anchorMatch) {
-      const [, anchor, op, offsetText] = anchorMatch;
-      const base2 = anchor === "<" ? previous?.start ?? 0 : previous?.end ?? 0;
-      if (!op) return Math.max(0, base2);
-      return Math.max(0, base2 + parseTime(offsetText, this.rateInput) * (op === "+=" ? 1 : -1));
-    }
-    if (TIME_LITERAL_RE.test(text)) return Math.max(0, parseTime(text, this.rateInput));
-    const labelMatch = text.match(LABEL_OFFSET_RE);
-    const labelName = labelMatch ? labelMatch[1] : text;
-    const base = this.labels.get(labelName);
-    if (base == null) throw new Error(`Unknown timeline label: ${at}`);
-    if (!labelMatch) return Math.max(0, base);
-    return Math.max(0, base + parseTime(labelMatch[3], this.rateInput) * (labelMatch[2] === "+=" ? 1 : -1));
-  }
-};
 var MotionValue = class {
   constructor(current) {
     this.current = current;
@@ -705,8 +585,594 @@ function stagger(interval = 60, { start = 0 } = {}) {
 // src/items.ts
 var defaultRenderContext = { direction: 1, fireCues: true };
 
+// src/transport.ts
+var Transport = class {
+  frameRate;
+  root;
+  onError = (err) => {
+    console.error(err);
+  };
+  schedulerRef;
+  clock;
+  _time = 0;
+  lastRenderedTime = 0;
+  _rate;
+  _state = "idle";
+  snap;
+  anchorClock = 0;
+  anchorTime = 0;
+  loopRegion = null;
+  explicitDuration;
+  removeFrame;
+  outputs = /* @__PURE__ */ new Set();
+  listeners = /* @__PURE__ */ new Set();
+  loopListeners = /* @__PURE__ */ new Set();
+  resolveFinished;
+  finished;
+  constructor(options = {}) {
+    this.schedulerRef = options.scheduler ?? scheduler;
+    this.clock = options.clock ?? { now: () => this.schedulerRef.now() };
+    this.frameRate = frameRate(options.frameRate ?? 60);
+    this._rate = options.rate ?? 1;
+    this.snap = options.snap ?? false;
+    this.root = options.root ?? new Timeline({ scheduler: options.scheduler });
+    if (options.duration != null) this.explicitDuration = parseTime(options.duration, this.frameRate);
+    this.finished = this.newFinished();
+    if (options.loop) this.setLoop(options.loop);
+  }
+  get time() {
+    return this._time;
+  }
+  get rate() {
+    return this._rate;
+  }
+  get state() {
+    return this._state;
+  }
+  get duration() {
+    return this.explicitDuration ?? this.root.totalDuration;
+  }
+  get frame() {
+    return msToFrame(this._time, this.frameRate);
+  }
+  get timecode() {
+    return formatTimecode(msToTimecode(this._time, this.frameRate));
+  }
+  get progress() {
+    const d = this.duration;
+    return d && Number.isFinite(d) ? this._time / d : 0;
+  }
+  add(item, at) {
+    this.root.add(item, at);
+    return this;
+  }
+  attach(output) {
+    this.outputs.add(output);
+    output.onAttach?.(this);
+    return () => {
+      if (this.outputs.delete(output)) output.onDetach?.();
+    };
+  }
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+  /** Notified once per lap when a loop region wraps. */
+  onLoop(listener) {
+    this.loopListeners.add(listener);
+    return () => {
+      this.loopListeners.delete(listener);
+    };
+  }
+  play() {
+    if (this._state === "playing") return this;
+    if (this._state === "finished") {
+      this._time = this._rate >= 0 ? 0 : this.boundedDuration();
+      this.lastRenderedTime = this._time;
+      this.root.reset?.();
+      this.finished = this.newFinished();
+    }
+    this._state = "playing";
+    this.anchorClock = this.clock.now();
+    this.anchorTime = this._time;
+    this.removeFrame = this.schedulerRef.add(this.onFrame);
+    this.emitStateChange();
+    return this;
+  }
+  pause() {
+    if (this._state !== "playing") return this;
+    this.removeFrame?.();
+    this._state = "paused";
+    this.emitStateChange();
+    return this;
+  }
+  stop() {
+    this.removeFrame?.();
+    this._state = "idle";
+    this._time = 0;
+    this.root.reset?.();
+    this.renderAt(0, false);
+    this.emitStateChange();
+    return this;
+  }
+  toggle() {
+    return this._state === "playing" ? this.pause() : this.play();
+  }
+  seek(to, options = {}) {
+    const target = Math.max(0, Math.min(this.boundedDuration(), parseTime(to, this.frameRate)));
+    this._time = target;
+    if (this._state === "playing") {
+      this.anchorClock = this.clock.now();
+      this.anchorTime = target;
+    }
+    this.renderAt(target, options.cues !== "skip");
+    this.emitSeek();
+    return this;
+  }
+  seekFrame(frame) {
+    return this.seek(frameToMs(frame, this.frameRate));
+  }
+  seekTimecode(tc) {
+    return this.seek(tc);
+  }
+  step(frames = 1) {
+    this.pause();
+    return this.seekFrame(this.frame + frames);
+  }
+  setRate(rate) {
+    if (this._state === "playing") {
+      this.anchorClock = this.clock.now();
+      this.anchorTime = this._time;
+    }
+    this._rate = rate;
+    for (const output of this.outputs) output.onRateChange?.(rate);
+    return this;
+  }
+  reverse() {
+    return this.setRate(-this._rate);
+  }
+  setLoop(loop) {
+    if (!loop) {
+      this.loopRegion = null;
+      return this;
+    }
+    if (loop === true) {
+      const duration = this.duration;
+      if (!Number.isFinite(duration)) throw new Error("Transport.setLoop(true) needs a finite duration; pass an explicit duration or a [from, to] region.");
+      this.loopRegion = [0, duration];
+      return this;
+    }
+    const [a, b] = loop;
+    this.loopRegion = [parseTime(a, this.frameRate), parseTime(b, this.frameRate)];
+    return this;
+  }
+  /** Follow an external clock (an LTC/MTC decoder, an OSC message, another transport). Hard-seeks past `threshold`; otherwise nudges rate to converge. */
+  chase(externalMs, options = {}) {
+    const smoothingWindow = (options.smoothing ?? 0.1) * 1e3;
+    const threshold = options.threshold ?? 40;
+    if (this._state !== "playing") this.play();
+    const diff = externalMs - this._time;
+    if (Math.abs(diff) > threshold) {
+      const direction = this._rate >= 0 ? 1 : -1;
+      this.seek(externalMs);
+      this.setRate(direction);
+      return this;
+    }
+    this.setRate(1 + diff / smoothingWindow);
+    return this;
+  }
+  /** Manually drive the transport from an absolute clock value. Used by offline rendering and tests. */
+  tick(now2) {
+    this.advance(now2);
+  }
+  dispose() {
+    this.removeFrame?.();
+    for (const output of this.outputs) output.onDetach?.();
+    this.outputs.clear();
+    this.listeners.clear();
+    this.loopListeners.clear();
+  }
+  // The scheduler is only a tick source; the time source is `this.clock` (which may
+  // differ, e.g. an AudioContext clock), so the scheduler's own `now` is ignored here.
+  onFrame = () => {
+    this.advance(this.clock.now());
+    return this._state === "playing";
+  };
+  advance(now2) {
+    const elapsed = now2 - this.anchorClock;
+    this.advanceTo(this.anchorTime + elapsed * this._rate);
+  }
+  advanceTo(rawTime) {
+    if (this.loopRegion) {
+      const [a, b] = this.loopRegion;
+      const len = b - a;
+      let remaining = rawTime;
+      let guard = 0;
+      while (len > 0 && guard++ < 1e4) {
+        if (this._rate >= 0) {
+          if (remaining <= b) break;
+          this.renderAt(b, true);
+          this.fireLoop();
+          remaining = a + (remaining - b);
+        } else {
+          if (remaining >= a) break;
+          this.renderAt(a, true);
+          this.fireLoop();
+          remaining = b + (remaining - a);
+        }
+      }
+      this._time = Math.max(a, Math.min(b, remaining));
+      this.renderAt(this._time, true);
+      return;
+    }
+    const duration = this.duration;
+    const clamped = Math.max(0, Math.min(duration, rawTime));
+    this._time = clamped;
+    this.renderAt(clamped, true);
+    const reachedEnd = Number.isFinite(duration) && duration > 0 && (this._rate >= 0 && clamped >= duration || this._rate < 0 && clamped <= 0);
+    if (reachedEnd && this._state === "playing") this.finish();
+  }
+  renderAt(time, fireCues) {
+    const quantized = this.snap ? this.frameSnap(time) : time;
+    const direction = quantized >= this.lastRenderedTime ? 1 : -1;
+    const delta = quantized - this.lastRenderedTime;
+    this._time = quantized;
+    const info = {
+      time: quantized,
+      frame: msToFrame(quantized, this.frameRate),
+      timecode: formatTimecode(msToTimecode(quantized, this.frameRate)),
+      delta,
+      rate: this._rate,
+      direction,
+      frameRate: this.frameRate
+    };
+    this.root.sampleAt(quantized, { direction, fireCues, frame: info, transport: this });
+    for (const output of this.outputs) {
+      try {
+        output.onTick?.(info);
+      } catch (err) {
+        this.onError(err);
+      }
+    }
+    for (const listener of this.listeners) listener(info, this);
+    this.lastRenderedTime = quantized;
+  }
+  frameSnap(ms) {
+    return frameToMs(msToFrame(ms, this.frameRate), this.frameRate);
+  }
+  emitSeek() {
+    const info = {
+      time: this._time,
+      frame: this.frame,
+      timecode: this.timecode,
+      delta: 0,
+      rate: this._rate,
+      direction: 1,
+      frameRate: this.frameRate
+    };
+    for (const output of this.outputs) output.onSeek?.(info);
+  }
+  emitStateChange() {
+    for (const output of this.outputs) output.onStateChange?.(this._state, this);
+  }
+  fireLoop() {
+    for (const listener of this.loopListeners) listener();
+  }
+  boundedDuration() {
+    const duration = this.duration;
+    return Number.isFinite(duration) ? duration : 0;
+  }
+  finish() {
+    this._state = "finished";
+    this.emitStateChange();
+    this.resolveFinished(this);
+  }
+  newFinished() {
+    return new Promise((resolve) => {
+      this.resolveFinished = resolve;
+    });
+  }
+};
+
+// src/timeline.ts
+var TIME_LITERAL_RE = /^-?\d+(?:\.\d+)?(?:f|s|ms)$|^\d{1,2}:\d{2}:\d{2}[:;]\d{1,2}$/i;
+var ANCHOR_RE = /^([<>])(?:([+-]=)(.+))?$/;
+var LABEL_OFFSET_RE = /^(.+?)([+-]=)(.+)$/;
+var Timeline = class _Timeline {
+  kind = "timeline";
+  name;
+  options;
+  entries = [];
+  labels = /* @__PURE__ */ new Map();
+  cursor = 0;
+  /** The furthest a marker/cue/region reaches; a cue-only timeline (no content) still has a real, sampleable duration. */
+  markerCursor = 0;
+  rateInput;
+  points = [];
+  markerMeta = /* @__PURE__ */ new Map();
+  lastCycleTime = null;
+  lastIteration = 0;
+  parentTimeline;
+  ownTransport;
+  constructor(options = {}) {
+    this.options = options;
+    this.name = options.name;
+    this.rateInput = options.frameRate;
+    if (options.autoplay) queueMicrotask(() => this.play());
+  }
+  // ---- content length vs. playback length -------------------------------
+  /** Content length: the furthest a child, marker, cue, or region reaches, before this timeline's own repeat/yoyo is applied. */
+  get duration() {
+    return Math.max(this.cursor, this.markerCursor);
+  }
+  /** Content length including this timeline's own repeat/repeatDelay. `Infinity` when `repeat` is `Infinity`. */
+  get totalDuration() {
+    return totalDuration({ duration: this.duration, delay: 0, repeat: this.options.repeat ?? 0, repeatDelay: this.options.repeatDelay ?? 0 });
+  }
+  get frameRate() {
+    return frameRate(this.rateInput ?? 60);
+  }
+  get frames() {
+    return msToFrame(this.duration, this.frameRate);
+  }
+  timecode(ms = this.duration) {
+    return msToTimecode(ms, this.frameRate);
+  }
+  // ---- tree ---------------------------------------------------------------
+  get parent() {
+    return this.parentTimeline;
+  }
+  get items() {
+    return this.entries;
+  }
+  /** Walks up to the outermost timeline and returns its private transport, if it has been played. */
+  get rootTransport() {
+    let node = this;
+    while (node.parentTimeline) node = node.parentTimeline;
+    return node.ownTransport;
+  }
+  label(name, at = this.cursor) {
+    const time = this.resolvePosition(at, this.entries.at(-1));
+    this.labels.set(name, time);
+    this.markerCursor = Math.max(this.markerCursor, time);
+    return this;
+  }
+  add(item, at) {
+    if (item instanceof _Timeline) {
+      if (item.parentTimeline) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ""} is already attached to another timeline.`);
+      if (item.ownTransport) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ""} already has its own transport (it was played directly); nest it before playing it.`);
+      item.parentTimeline = this;
+      if (item.rateInput == null && this.rateInput != null) item.rateInput = this.rateInput;
+    }
+    const previous = this.entries.at(-1);
+    const start = this.resolvePosition(at, previous);
+    const end = start + item.totalDuration;
+    this.entries.push({ item, start, end });
+    this.cursor = Math.max(this.cursor, end);
+    return this;
+  }
+  /** @deprecated kept for the pre-0.4 API; identical to `add`. */
+  addTween(tween, at) {
+    return this.add(tween, at);
+  }
+  addTweens(tweens) {
+    tweens.forEach((tween) => this.add(tween));
+    return this;
+  }
+  remove(item) {
+    const index = this.entries.findIndex((entry) => entry.item === item);
+    if (index === -1) return this;
+    this.entries.splice(index, 1);
+    if (item instanceof _Timeline && item.parentTimeline === this) item.parentTimeline = void 0;
+    this.cursor = this.entries.reduce((max, entry) => Math.max(max, entry.end), 0);
+    return this;
+  }
+  clear() {
+    for (const entry of this.entries) if (entry.item instanceof _Timeline && entry.item.parentTimeline === this) entry.item.parentTimeline = void 0;
+    this.entries = [];
+    this.labels.clear();
+    this.markerMeta.clear();
+    this.points = [];
+    this.cursor = 0;
+    this.markerCursor = 0;
+    this.lastCycleTime = null;
+    this.lastIteration = 0;
+    return this;
+  }
+  // ---- markers, cues, regions ---------------------------------------------
+  get markers() {
+    return [...this.labels.entries()].map(([name, time]) => ({ kind: "marker", name, time, ...this.markerMeta.get(name) })).sort((a, b) => a.time - b.time);
+  }
+  get cues() {
+    return this.points.map((p) => ({ name: p.name, time: p.time })).sort((a, b) => a.time - b.time);
+  }
+  marker(name, at = this.cursor, options = {}) {
+    const time = this.resolvePosition(at, this.entries.at(-1));
+    this.labels.set(name, time);
+    this.markerCursor = Math.max(this.markerCursor, time);
+    if (options.color != null || options.payload !== void 0) this.markerMeta.set(name, options);
+    return this;
+  }
+  cue(name, at, handler, options = {}) {
+    const time = this.resolvePosition(at, this.entries.at(-1));
+    this.insertPoint({ name, time, payload: options.payload, once: options.once ?? false, fired: false, onForward: handler, onBackward: handler });
+    return this;
+  }
+  region(name, from, to, options = {}) {
+    const previous = this.entries.at(-1);
+    const fromTime = this.resolvePosition(from, previous);
+    const toTime = this.resolvePosition(to, previous);
+    const payload = options.payload;
+    const once = options.once ?? false;
+    this.insertPoint({ name, time: fromTime, payload, once, fired: false, onForward: options.onEnter, onBackward: options.onExit });
+    this.insertPoint({ name, time: toTime, payload, once, fired: false, onForward: options.onExit, onBackward: options.onEnter });
+    return this;
+  }
+  insertPoint(point) {
+    const index = this.points.findIndex((existing) => existing.time > point.time);
+    if (index === -1) this.points.push(point);
+    else this.points.splice(index, 0, point);
+    this.markerCursor = Math.max(this.markerCursor, point.time);
+  }
+  seekToMarker(name) {
+    const time = this.labels.get(name);
+    if (time == null) throw new Error(`Unknown timeline label: ${name}`);
+    this.seek(this.totalDuration ? time / this.totalDuration : 0);
+    return this;
+  }
+  nextMarker(fromMs = this.lastCycleTime ?? 0) {
+    return this.markers.find((marker) => marker.time > fromMs);
+  }
+  previousMarker(fromMs = this.lastCycleTime ?? 0) {
+    return [...this.markers].reverse().find((marker) => marker.time < fromMs);
+  }
+  // ---- playback (root timelines only) --------------------------------------
+  nestedError() {
+    return `Timeline${this.name ? ` "${this.name}"` : ""} is nested; control its root transport instead.`;
+  }
+  get transport() {
+    if (this.parentTimeline) throw new Error(this.nestedError());
+    if (!this.ownTransport) {
+      this.ownTransport = new Transport({ root: this, scheduler: this.options.scheduler, frameRate: this.rateInput, snap: this.options.snap });
+    }
+    return this.ownTransport;
+  }
+  get state() {
+    return this.transport.state;
+  }
+  get finished() {
+    return this.transport.finished;
+  }
+  play() {
+    this.transport.play();
+    return this;
+  }
+  start() {
+    return this.play();
+  }
+  pause() {
+    this.transport.pause();
+    return this;
+  }
+  stop() {
+    this.transport.stop();
+    return this;
+  }
+  reverse() {
+    this.transport.reverse();
+    return this;
+  }
+  /** `progress` is a 0..1 fraction of `totalDuration`, matching the pre-0.4 API. */
+  seek(progress) {
+    const duration = this.totalDuration;
+    this.transport.seek(Number.isFinite(duration) ? Math.max(0, Math.min(1, progress)) * duration : 0);
+    return this;
+  }
+  loop(value = true) {
+    this.options.repeat = value ? Infinity : 0;
+    return this;
+  }
+  // ---- sampling -------------------------------------------------------------
+  sampleAt(localMs, ctx = defaultRenderContext) {
+    const spec = {
+      duration: this.duration,
+      delay: 0,
+      repeat: this.options.repeat ?? 0,
+      repeatDelay: this.options.repeatDelay ?? 0,
+      direction: this.options.yoyo ? "alternate" : "normal",
+      reversed: false
+    };
+    const { cycleTime, iteration, progress } = sampleCycle(spec, localMs);
+    if (ctx.fireCues && this.points.length) this.fireCrossings(cycleTime, iteration, ctx);
+    this.lastCycleTime = cycleTime;
+    this.lastIteration = iteration;
+    for (const entry of this.entries) entry.item.sampleAt(cycleTime - entry.start, ctx);
+    this.options.onUpdate?.(cycleTime, progress);
+    if (progress >= 1 && iteration >= (this.options.repeat ?? 0)) this.options.onComplete?.();
+    return cycleTime;
+  }
+  /** Alias of `sampleAt` for absolute (not delay-relative) callers, matching the pre-0.4 API. */
+  render(time) {
+    this.sampleAt(time);
+  }
+  reset() {
+    this.lastCycleTime = null;
+    this.lastIteration = 0;
+    for (const point of this.points) point.fired = false;
+    for (const entry of this.entries) entry.item.reset?.();
+  }
+  iterationReversed(iteration) {
+    return this.options.yoyo === true && iteration % 2 === 1;
+  }
+  fireCrossings(cycleTime, iteration, ctx) {
+    if (this.lastCycleTime == null) {
+      this.fireSegment(ctx.direction >= 0 ? -Infinity : Infinity, cycleTime, ctx);
+      return;
+    }
+    if (iteration === this.lastIteration) {
+      this.fireSegment(this.lastCycleTime, cycleTime, ctx);
+      return;
+    }
+    const stepDir = iteration > this.lastIteration ? 1 : -1;
+    let iter = this.lastIteration;
+    let from = this.lastCycleTime;
+    let guard = 0;
+    while (iter !== iteration && guard++ < 2e3) {
+      const tail = this.iterationReversed(iter) ? 0 : this.duration;
+      this.fireSegment(from, tail, ctx);
+      iter += stepDir;
+      from = this.iterationReversed(iter) ? this.duration : 0;
+    }
+    this.fireSegment(from, cycleTime, ctx);
+  }
+  fireSegment(fromT, toT, ctx) {
+    if (toT === fromT || !this.points.length) return;
+    const forward = toT > fromT;
+    const ordered = forward ? this.points : [...this.points].reverse();
+    for (const point of ordered) {
+      const crossed = forward ? point.time > fromT && point.time <= toT : point.time <= fromT && point.time > toT;
+      if (!crossed) continue;
+      if (point.once && point.fired) continue;
+      const handler = forward ? point.onForward : point.onBackward;
+      if (!handler) continue;
+      point.fired = true;
+      const event = { name: point.name, time: point.time, direction: forward ? 1 : -1, payload: point.payload, timeline: this, frame: ctx.frame };
+      try {
+        handler(event);
+      } catch (err) {
+        (this.rootTransport?.onError ?? defaultOnError)(err);
+      }
+    }
+  }
+  // ---- positions --------------------------------------------------------
+  resolvePosition(at, previous) {
+    if (at == null) return previous?.end ?? 0;
+    if (typeof at === "number") return Math.max(0, at);
+    const text = at.trim();
+    const anchorMatch = text.match(ANCHOR_RE);
+    if (anchorMatch) {
+      const [, anchor, op, offsetText] = anchorMatch;
+      const base2 = anchor === "<" ? previous?.start ?? 0 : previous?.end ?? 0;
+      if (!op) return Math.max(0, base2);
+      return Math.max(0, base2 + parseTime(offsetText, this.rateInput) * (op === "+=" ? 1 : -1));
+    }
+    if (TIME_LITERAL_RE.test(text)) return Math.max(0, parseTime(text, this.rateInput));
+    const labelMatch = text.match(LABEL_OFFSET_RE);
+    const labelName = labelMatch ? labelMatch[1] : text;
+    const base = this.labels.get(labelName);
+    if (base == null) throw new Error(`Unknown timeline label: ${at}`);
+    if (!labelMatch) return Math.max(0, base);
+    return Math.max(0, base + parseTime(labelMatch[3], this.rateInput) * (labelMatch[2] === "+=" ? 1 : -1));
+  }
+};
+function defaultOnError(err) {
+  console.error(err);
+}
+
 // src/index.ts
-var src_default = { Tween, Timeline, Line, MotionValue, animate, stagger, Easing, cubicBezier, spring };
+var src_default = { Tween, Timeline, Transport, Line, MotionValue, animate, stagger, Easing, cubicBezier, spring };
 export {
   Easing,
   FrameRates,
@@ -714,6 +1180,7 @@ export {
   Line,
   MotionValue,
   Timeline,
+  Transport,
   Tween,
   activeDuration,
   addFrames,

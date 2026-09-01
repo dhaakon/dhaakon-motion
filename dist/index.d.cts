@@ -1,9 +1,10 @@
-import { T as Tween, a as Timeline, L as Line, M as MotionValue, b as animate, s as stagger, E as EasingFunction, c as cubicBezier, d as spring } from './core-Cr8UG3gM.cjs';
-export { C as CycleSample, e as CycleSpec, D as Direction, f as Easing, g as EasingName, F as FrameDriver, h as FrameRate, i as FrameRateInput, j as FrameRates, k as FrameScheduler, l as FrameTask, m as MotionPrimitive, n as MotionValueShape, P as PropertyRange, R as RenderContext, o as TimeInput, p as Timecode, q as TimelineItem, r as TimelineOptions, t as TimelinePosition, u as TweenOptions, v as TweenState, w as activeDuration, x as addFrames, y as defaultRenderContext, z as formatTime, A as formatTimecode, B as frameRate, G as frameToMs, H as framesToTimecode, I as interpolate, J as mix, K as msToFrame, N as msToTimecode, O as parseTime, Q as parseTimecode, S as resolveEasing, U as sampleCycle, V as scheduler, W as snapToFrame, X as timecodeToFrames, Y as timecodeToMs, Z as totalDuration } from './core-Cr8UG3gM.cjs';
+import { T as Tween, a as Timeline, b as Transport, L as Line, M as MotionValue, c as animate, s as stagger, E as EasingFunction, d as cubicBezier, e as spring } from './core-D60sAinY.cjs';
+export { C as Clock, f as CueEvent, g as CueOptions, h as CycleSample, i as CycleSpec, D as Direction, j as Easing, k as EasingName, F as FrameDriver, l as FrameInfo, m as FrameRate, n as FrameRateInput, o as FrameRates, p as FrameScheduler, q as FrameTask, r as Marker, t as MotionPrimitive, u as MotionValueShape, P as PropertyRange, R as RenderContext, v as TimeInput, w as Timecode, x as TimelineItem, y as TimelineOptions, z as TimelinePosition, A as TransportOptions, B as TransportOutput, G as TransportState, H as TweenOptions, I as TweenState, J as activeDuration, K as addFrames, N as defaultRenderContext, O as formatTime, Q as formatTimecode, S as frameRate, U as frameToMs, V as framesToTimecode, W as interpolate, X as mix, Y as msToFrame, Z as msToTimecode, _ as parseTime, $ as parseTimecode, a0 as resolveEasing, a1 as sampleCycle, a2 as scheduler, a3 as snapToFrame, a4 as timecodeToFrames, a5 as timecodeToMs, a6 as totalDuration } from './core-D60sAinY.cjs';
 
 declare const _default: {
     Tween: typeof Tween;
     Timeline: typeof Timeline;
+    Transport: typeof Transport;
     Line: typeof Line;
     MotionValue: typeof MotionValue;
     animate: typeof animate;
@@ -26,4 +27,4 @@ declare const _default: {
     spring: typeof spring;
 };
 
-export { EasingFunction, Line, MotionValue, Timeline, Tween, animate, cubicBezier, _default as default, spring, stagger };
+export { EasingFunction, Line, MotionValue, Timeline, Transport, Tween, animate, cubicBezier, _default as default, spring, stagger };

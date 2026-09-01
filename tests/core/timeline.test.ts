@@ -40,6 +40,78 @@ test('an unknown label still throws a clear error', () => {
   expect(() => timeline.add(new Tween(), 'nope')).toThrow(/Unknown timeline label: nope/);
 });
 
+function buildRepeatingChild() {
+  const a = new Tween({ from: 0, to: 10, duration: 100, easing: 'linear' });
+  const b = new Tween({ from: 100, to: 200, duration: 60, easing: 'linear' });
+  const timeline = new Timeline({ repeat: 1, yoyo: true }).add(a, 0).add(b, 40);
+  return { timeline, a, b };
+}
+
+test('a nested timeline samples equivalently to sampling it directly at (t - start)', () => {
+  const standalone = buildRepeatingChild();
+  const nested = buildRepeatingChild();
+  const parent = new Timeline();
+  parent.label('intro', 50);
+  parent.add(nested.timeline, 'intro');
+
+  const span = 50 + nested.timeline.totalDuration + 20;
+  for (let t = 0; t <= span; t += 3) {
+    parent.sampleAt(t);
+    standalone.timeline.sampleAt(Math.max(0, t - 50));
+    expect(nested.a.value).toBeCloseTo(standalone.a.value as number, 6);
+    expect(nested.b.value).toBeCloseTo(standalone.b.value as number, 6);
+  }
+});
+
+test('three levels of nesting sample equivalently to sampling the leaf directly', () => {
+  const leafStandalone = new Tween({ from: 0, to: 1, duration: 100, easing: 'linear' });
+  const leafNested = new Tween({ from: 0, to: 1, duration: 100, easing: 'linear' });
+
+  const grandchild = new Timeline().add(leafNested, 0);
+  const child = new Timeline().label('inner', 30).add(grandchild, 'inner');
+  const root = new Timeline().label('outer', 20).add(child, 'outer');
+
+  for (let t = 0; t <= 20 + 30 + 100 + 10; t += 4) {
+    root.sampleAt(t);
+    leafStandalone.sampleAt(Math.max(0, t - 20 - 30));
+    expect(leafNested.value).toBeCloseTo(leafStandalone.value as number, 6);
+  }
+});
+
+test('a nested timeline without its own frameRate inherits the parent\'s at attach time', () => {
+  const parent = new Timeline({ frameRate: 24 });
+  const child = new Timeline();
+  parent.add(child, 0);
+  expect(child.frameRate).toEqual(parent.frameRate);
+});
+
+test('a nested timeline keeps its own explicit frameRate', () => {
+  const parent = new Timeline({ frameRate: 24 });
+  const child = new Timeline({ frameRate: 30 });
+  parent.add(child, 0);
+  expect(child.frameRate.fps).toBe(30);
+});
+
+test('playing a nested timeline directly throws', () => {
+  const parent = new Timeline();
+  const child = new Timeline();
+  parent.add(child, 0);
+  expect(() => child.play()).toThrow(/nested/);
+});
+
+test('attaching an already-attached or already-played timeline throws', () => {
+  const a = new Timeline();
+  const b = new Timeline();
+  b.add(new Timeline(), 0);
+  const shared = new Timeline();
+  a.add(shared, 0);
+  expect(() => b.add(shared, 0)).toThrow(/already attached/);
+
+  const played = new Timeline();
+  played.play();
+  expect(() => a.add(played, 0)).toThrow(/own transport/);
+});
+
 test('timeline samples overlapping children from one clock', () => {
   const driver = new ManualDriver();
   const loop = new FrameScheduler(driver);

@@ -3,7 +3,7 @@ import { interpolate, type MotionValueShape } from './interpolate';
 import { scheduler, type FrameScheduler, type FrameTask } from './scheduler';
 import { sampleCycle, type Direction } from './cycle';
 import type { RenderContext, TimelineItem } from './items';
-import { frameRate, msToFrame, parseTime, snapToFrame, type FrameRateInput } from './time';
+import { frameRate, msToFrame, type FrameRateInput } from './time';
 import { msToTimecode, type Timecode } from './timecode';
 
 export type TweenState = 'idle' | 'delayed' | 'running' | 'paused' | 'finished' | 'cancelled';
@@ -125,86 +125,6 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
     this.onEnd?.(this); this.onComplete?.(this); this.resolveFinished(this); return false;
   };
   private newFinishedPromise() { return new Promise<this>((resolve) => { this.resolveFinished = resolve; }); }
-}
-
-export interface TimelineOptions {
-  repeat?: number; yoyo?: boolean; autoplay?: boolean; onUpdate?: (time: number, progress: number) => void; onComplete?: () => void; scheduler?: FrameScheduler;
-  /** Frame rate used to resolve frame ('12f') and timecode positions, and by `.frames`/`.timecode()`. Defaults to 60 fps. */
-  frameRate?: FrameRateInput;
-  /** Quantize every rendered time to a frame boundary before sampling children. */
-  snap?: boolean;
-}
-export type TimelinePosition = number | '<' | '>' | string;
-interface TimelineEntry { tween: Tween<MotionValueShape>; start: number; end: number; }
-
-const TIME_LITERAL_RE = /^-?\d+(?:\.\d+)?(?:f|s|ms)$|^\d{1,2}:\d{2}:\d{2}[:;]\d{1,2}$/i;
-const ANCHOR_RE = /^([<>])(?:([+-]=)(.+))?$/;
-const LABEL_OFFSET_RE = /^(.+?)([+-]=)(.+)$/;
-
-export class Timeline {
-  private entries: TimelineEntry[] = []; private labels = new Map<string, number>(); private cursor = 0; private driver: Tween<number>;
-  readonly options: TimelineOptions;
-  private readonly rateInput?: FrameRateInput;
-  constructor(options: TimelineOptions = {}) {
-    this.options = options;
-    this.rateInput = options.frameRate;
-    this.driver = new Tween({ from: 0, to: 0, duration: 0, easing: 'linear', repeat: options.repeat, yoyo: options.yoyo, scheduler: options.scheduler,
-      onUpdate: (time) => this.render(time), onComplete: () => options.onComplete?.() });
-    if (options.autoplay) queueMicrotask(() => this.play());
-  }
-  get duration() { return this.cursor; }
-  get state() { return this.driver.state; }
-  get finished() { return this.driver.finished; }
-  /** The timeline's own frame rate (default 60 fps), used for `.frames`, `.timecode()`, `snap`, and frame/timecode positions. */
-  get frameRate() { return frameRate(this.rateInput ?? 60); }
-  get frames() { return msToFrame(this.duration, this.frameRate); }
-  timecode(ms = this.duration) { return msToTimecode(ms, this.frameRate); }
-  label(name: string, at: TimelinePosition = this.cursor) { this.labels.set(name, this.resolvePosition(at, this.entries.at(-1))); return this; }
-  add<T extends MotionValueShape>(tween: Tween<T>, at?: TimelinePosition) {
-    const previous = this.entries.at(-1); const start = this.resolvePosition(at, previous);
-    const end = start + tween.totalDuration; this.entries.push({ tween: tween as unknown as Tween<MotionValueShape>, start, end }); this.cursor = Math.max(this.cursor, end); return this;
-  }
-  addTween<T extends MotionValueShape>(tween: Tween<T>, at?: TimelinePosition) { return this.add(tween, at); }
-  addTweens(tweens: Tween<MotionValueShape>[]) { tweens.forEach((tween) => this.add(tween)); return this; }
-  play() {
-    const playback: TweenOptions<number> = { from: 0, to: this.duration, duration: this.duration };
-    if (this.options.repeat != null) playback.repeat = this.options.repeat;
-    if (this.options.yoyo != null) playback.yoyo = this.options.yoyo;
-    this.driver.configure(playback).play(); return this;
-  }
-  start() { return this.play(); }
-  pause() { this.driver.pause(); return this; }
-  stop() { this.driver.stop(); this.render(0); return this; }
-  reverse() { this.driver.reverse(); return this; }
-  seek(progress: number) { this.driver.seek(progress); return this; }
-  loop(value = true) { this.driver.repeat = value ? Infinity : 0; return this; }
-  render(time: number) {
-    const sampled = this.options.snap ? snapToFrame(time, this.frameRate) : time;
-    for (const entry of this.entries) entry.tween.sampleAt(sampled - entry.start);
-    this.options.onUpdate?.(sampled, this.duration ? sampled / this.duration : 1);
-  }
-  private resolvePosition(at: TimelinePosition | undefined, previous?: TimelineEntry): number {
-    if (at == null) return previous?.end ?? 0;
-    if (typeof at === 'number') return Math.max(0, at);
-    const text = at.trim();
-
-    const anchorMatch = text.match(ANCHOR_RE);
-    if (anchorMatch) {
-      const [, anchor, op, offsetText] = anchorMatch;
-      const base = anchor === '<' ? (previous?.start ?? 0) : (previous?.end ?? 0);
-      if (!op) return Math.max(0, base);
-      return Math.max(0, base + parseTime(offsetText, this.rateInput) * (op === '+=' ? 1 : -1));
-    }
-
-    if (TIME_LITERAL_RE.test(text)) return Math.max(0, parseTime(text, this.rateInput));
-
-    const labelMatch = text.match(LABEL_OFFSET_RE);
-    const labelName = labelMatch ? labelMatch[1] : text;
-    const base = this.labels.get(labelName);
-    if (base == null) throw new Error(`Unknown timeline label: ${at}`);
-    if (!labelMatch) return Math.max(0, base);
-    return Math.max(0, base + parseTime(labelMatch[3], this.rateInput) * (labelMatch[2] === '+=' ? 1 : -1));
-  }
 }
 
 export class MotionValue<T extends MotionValueShape> {
