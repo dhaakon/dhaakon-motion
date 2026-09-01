@@ -1,6 +1,6 @@
 # @dhaakon/motion
 
-The original `dhaak-anim` tween vocabulary, rebuilt as the motion layer for the Dhaakon network. The core is dependency-free and framework-agnostic; React support is a separate, optional entry point.
+The original `dhaak-anim` tween vocabulary, rebuilt as the motion layer for the Dhaakon network. The core is dependency-free and framework-agnostic; React, Three.js, Web Audio, and Web MIDI support are separate, optional entry points.
 
 Documentation and live playground: **http://dhaakon-ubuntu:21764**
 
@@ -56,7 +56,165 @@ const sequence = new Timeline()
 sequence.play();
 ```
 
-Positions can be absolute milliseconds, labels, relative label offsets, `<` (align with the previous start), or `>` (follow the previous end). A timeline samples children from its own clock, making overlaps, pause, seek, and reverse deterministic.
+Positions can be absolute milliseconds, labels, relative label offsets, `<` (align with the previous start), `>` (follow the previous end) — each also accepts a `+=`/`-=` offset (`'<+=100'`, `'>-=00:00:00:06'`) — or a frame/timecode literal directly (`'12f'`, `'00:00:01:00'`). A timeline samples children from its own clock, making overlaps, pause, seek, and reverse deterministic.
+
+## Transport
+
+A `Transport` is the clock authority a composition plays through — timelines render into it, and any number of outputs (DOM, Three.js, Canvas, audio, hardware) attach to it and draw once per tick, after every value for that instant has been written.
+
+```ts
+import { Transport, Timeline, Tween } from '@dhaakon/motion';
+
+const show = new Timeline().add(titleTween, 0).add(bodyTween, '>');
+
+const transport = new Transport({ root: show, frameRate: 24, loop: [0, '00:00:04:00'] });
+transport.play();
+transport.pause();
+transport.seek('00:00:02:00');   // absolute time — a timecode, '12f', '1.5s', or plain ms
+transport.step(1);               // ±1 frame, pauses first
+transport.setRate(-1);           // plays backward
+transport.chase(externalMs);     // follow an external clock (hard-seeks past a threshold, else nudges rate to converge)
+await transport.finished;        // resolves once, at the end, when not looping
+```
+
+`new Timeline().play()` still works exactly as before — a root timeline lazily owns a private `Transport`, and `play`/`pause`/`stop`/`reverse`/`seek` (still 0–1 progress, unchanged) forward to it.
+
+`transport.frame`, `.timecode`, `.progress`, and `.duration` read the current position; `snap: true` quantizes every rendered time to a frame boundary. `transport.attach(output)` connects a `TransportOutput` (`onTick`, `onStateChange`, `onSeek`, `onRateChange`, `onAttach`/`onDetach`); `transport.subscribe(listener)` is a lighter per-tick hook without the output lifecycle.
+
+## SMPTE timecode and frame rates
+
+```ts
+import { frameRate, parseTime, formatTime, msToTimecode, timecodeToMs } from '@dhaakon/motion';
+
+const rate = frameRate('29.97df');       // drop-frame, only legal at 29.97/59.94
+parseTime('00:01:00;02', rate);          // 1800 frames worth of ms
+formatTime(60000, rate, 'timecode');     // '00:01:00;02'
+```
+
+`FrameRates` has presets from `23.976` through `60`, including `29.97df`/`59.94df`. `msToFrame`/`frameToMs` are the plain rational conversion (frame ↔ ms, no drop-frame correction — a frame's actual moment in time never changes); the drop-frame correction lives in `timecodeToFrames`/`framesToTimecode`, which only affects how a frame count is *displayed*. `Tween.frameAt(rate)`/`.timecodeAt(rate)` and `Timeline.frames`/`.timecode()` read the same way.
+
+## Nested timelines, markers, and cues
+
+Timelines nest — `.add()` accepts another `Timeline` (or a `Track`, see below) exactly like a `Tween`:
+
+```ts
+const intro = new Timeline({ name: 'intro', repeat: 1, yoyo: true }).add(titleTween, 0);
+
+const show = new Timeline({ name: 'show', frameRate: 24 })
+  .label('verse', '00:00:02:00')
+  .add(intro, 'verse')
+  .marker('chorus', 'verse+=4s', { color: '#d9ff43' })
+  .cue('blackout', 'chorus+=12f', (e) => dmx.send(e.payload), { payload: { channel: 1, value: 0 } })
+  .region('spotlight', 'verse', 'chorus', { onEnter: () => light.on(), onExit: () => light.off() });
+```
+
+A cue fires forward and backward — `e.direction` says which — whenever the playhead crosses `at`, including on a scrub, a seek, or a repeat/yoyo lap turning over (a cue at the end of a repeating timeline fires exactly once per lap, not once per sample). A `region`'s `onEnter`/`onExit` are direction-paired at its two boundaries. `once: true` disarms a cue until `timeline.reset()`. A nested timeline without its own `frameRate` inherits its parent's at attach time; playing a nested timeline directly throws (`"is nested; control its root transport instead"`) — control the whole composition through its root `Transport`.
+
+## Deterministic offline rendering
+
+```ts
+import { renderFrames, frames } from '@dhaakon/motion';
+
+const { frames: count } = await renderFrames(show, (info) => {
+  encoder.addFrame(canvas.toDataURL(), info.frame);
+}, { frameRate: 24, to: '00:00:04:00' });
+
+for (const info of frames(show, { frameRate: 24 })) drawOneFrame(info);
+```
+
+`renderFrames` walks an integer frame index and seeks to `frameToMs(frame, rate)` each step — no time accumulation, so running it twice (or resuming it on the same `Transport` where a prior call left off) produces identical output. Every cue in the rendered range fires exactly once, in order, regardless of frame rate. `OfflineTransport` never touches the scheduler or `performance.now`, and skips (with one warning) any attached output whose `supportsOffline` is `false`.
+
+## Outputs: DOM, Three.js, Canvas, audio, MIDI
+
+Every output implements `TransportOutput`; `transport.attach(output)` connects it.
+
+```ts
+import { drawOutput, signalOutput } from '@dhaakon/motion';
+
+transport.attach(drawOutput((info) => renderer.drawFrame(info)));               // Canvas or any custom renderer
+transport.attach(signalOutput((signal, cue) => lightingDesk.send(signal)));     // routes every fired cue's payload
+```
+
+```ts
+import { threeOutput, objectTrack, cameraTrack, uniformTrack } from '@dhaakon/motion/three';
+
+const camera = new Track(cameraTrack(threeCamera, [
+  { at: 0, value: { position: [0, 1, 9], fov: 44 } },
+  { at: 4000, value: { position: [-3, 2, 5], fov: 30 }, easing: 'dhaakon' },
+]));
+transport.add(objectTrack(rig, keyframes), 0);
+transport.attach(threeOutput({ renderer, scene, camera: threeCamera }));        // one render() per tick
+```
+
+```ts
+import { audioClock, AudioClip, audioOutput, paramTrack } from '@dhaakon/motion/audio';
+
+const transport = new Transport({ clock: audioClock(context) });                // audio becomes the master clock
+transport.add(new AudioClip({ context, buffer, gain: 0.8 }), '1s');
+transport.attach(audioOutput(context));                                         // schedules BufferSources; no reverse audio
+```
+
+```ts
+import { midiOutput, noteCue } from '@dhaakon/motion/midi';
+
+noteCue(show, '00:00:01:00', 60, { velocity: 100, duration: '200ms' });
+transport.attach(midiOutput(midiAccess.outputs.values().next().value));
+```
+
+Three.js and Web Audio/MIDI types are peer/ambient dependencies only — the core (`.`) entry has zero runtime dependencies regardless of which output entries a project also imports.
+
+## Cue sheets and scene states
+
+A composition can round-trip through plain JSON:
+
+```ts
+import { loadSheet, saveSheet, validateSheet } from '@dhaakon/motion';
+
+const { ok, sheet, errors } = validateSheet(json);
+const timeline = loadSheet(sheet, { targets: { camera: cameraSignal }, cues: { blackout: (e) => dmx.send(e.payload) } });
+const backToJson = saveSheet(timeline);   // target bindings and easing round-trip
+```
+
+```ts
+import { captureScene, applyScene, sceneTransition } from '@dhaakon/motion';
+
+const rehearsal = captureScene({ camera: cameraSignal, energy: energyValue });
+applyScene(liveState, { camera: cameraSignal, energy: energyValue }, { transition: { duration: 600, easing: 'dhaakon' } });
+```
+
+`loadSheet`'s `strict` option (default `true`) throws on a missing target/asset or an unhandled item type, naming it with a JSON path; pass `strict: false` to warn and skip instead. `bindings.createItem` is the escape hatch for item types the core doesn't know (`'audio'`, built from `AudioClip`).
+
+## Testing compositions
+
+```ts
+import { createTestScheduler, expectSample, snapshotTimeline } from '@dhaakon/motion/testing';
+
+const { driver, scheduler } = createTestScheduler();
+const timeline = new Timeline({ scheduler }).add(new Tween({ from: 0, to: 100, duration: 1000 }), 0);
+driver.step(500);
+expectSample(timeline, 500, { 0: 50 });        // throws with the ASCII timeline on mismatch
+console.log(snapshotTimeline(timeline).ascii); // for a snapshot test
+```
+
+`ManualDriver` makes any `FrameScheduler` (and, via `installFrameDriver()`, the shared global one `motion.*`/`useTween` use) fully deterministic — nothing runs until `.step()`/`.advance()`. `fakeAudioContext()`/`fakeOfflineAudioContext()`/`fakeMidiPort()` stand in for Web Audio/MIDI in a test.
+
+## Inspecting a timeline
+
+```ts
+timeline.inspect();     // { kind, name, start, end, duration, totalDuration, repeat, direction, children, markers, cues }
+timeline.toAscii();     // a stable, human-readable rendering of the tree, its markers, and its cues
+timeline.explain('verse+=12f'); // { ms, frame, timecode, base: 'verse', offset: 200 }
+transport.trace();      // a ring-buffer TransportOutput recording every tick and the cues that fired
+```
+
+```ts
+import { mountInspector } from '@dhaakon/motion/devtools';
+
+const inspector = mountInspector(transport);   // a plain-DOM transport bar + timeline lanes overlay
+inspector.unmount();
+```
+
+`./devtools` is dependency-free and only loaded where you import it — it never ships as part of a production bundle unless a project reaches for it directly.
 
 ## React
 
@@ -81,7 +239,7 @@ The React entry point exports:
 - `Motion` — render-prop animation for SVG, canvas, and component props
 - `useTween` — animated state plus controls
 - `useMotionValue` / `useMotionValueState` — external observable values
-- `useTimeline` — lifecycle-safe timeline composition
+- `useTimeline` — lifecycle-safe timeline composition (imperative; prefer `<Sequence>` below for declarative composition)
 - `MotionConfig` / `useReducedMotion` — shared transitions and accessible motion policy
 
 React 18 and 19 are optional peer dependencies. Importing the core never loads React.
@@ -93,6 +251,26 @@ React 18 and 19 are optional peer dependencies. Importing the core never loads R
 ```
 
 Reveal observers disconnect after the first entrance by default, and resolve immediately when reduced motion is requested. Use `once={false}` when a composition should respond each time it crosses the viewport.
+
+### Declarative transport composition
+
+```tsx
+import { Transport, Sequence, Track, Tween, Marker, Cue, Region, useTransport, usePlayhead, useCue } from '@dhaakon/motion/react';
+
+<Transport frameRate={24} loop autoplay respectReducedMotion>
+  <Sequence name="show">
+    <Track target={cameraSignal} keyframes={[...]} easing="dhaakon" />
+    <Sequence name="intro" at="show+=200" repeat={1} yoyo>
+      <Tween target={titleOpacity} from={0} to={1} duration="12f" />
+    </Sequence>
+    <Marker name="verse" at="00:00:02:00" />
+    <Cue name="blackout" at="verse+=12f" onFire={(e) => dmx.send(e.payload)} payload={{ channel: 1 }} />
+    <Region name="chorus" from="6s" to="8s" onEnter={() => {}} onExit={() => {}} />
+  </Sequence>
+</Transport>
+```
+
+`<Transport>` owns (or, given a `transport` prop, adopts) a `Transport` and provides it via context; `autoplay`/`paused` (controlled) drive play/pause reactively, and `respectReducedMotion` (default `true`) parks it at the end instead of playing when the user prefers reduced motion. `<Track>`/`<Tween>`/`<Marker>`/`<Cue>`/`<Region>` register into the nearest `<Sequence>` (or the root); a prop change coalesces through a microtask into one rebuild that reseeks the transport back to where the playhead already was, so it never jumps or refires what it already crossed. `useTransport()`/`useTransportState()`/`usePlayhead({fps})`/`usePlayheadValue()` (a `MotionValue`, no React render per tick) and `useCue(at, handler)` read and hook into it from anywhere beneath the provider. There is no `<AudioClip>` React wrapper — `useTransport()` to add one imperatively keeps the React entry free of a Web Audio dependency.
 
 ## Custom renderers and Three.js
 
@@ -135,9 +313,29 @@ The live documentation contains the complete Three.js example, including procedu
 ## Development
 
 ```sh
-npm test
-npm run docs:dev       # http://localhost:5175
+npm run check           # typecheck + vitest + the packaged-output compatibility test
+npm test                # vitest only
+npm run docs:dev        # http://localhost:5175
 npm run docs:build
 ```
 
 The documentation site imports the package source directly and uses `@dhaakon/ui`. Its network container is `dhaakon-motion-docs` in the `dhaakon-network` Compose stack.
+
+## Entry points
+
+| Import | Contents |
+| --- | --- |
+| `@dhaakon/motion` | `Tween`, `Timeline`, `Transport`, `Track`, `MotionValue`, easing, timecode/frame-rate utilities, cue sheets, scene states, offline rendering, `drawOutput`/`signalOutput` |
+| `@dhaakon/motion/react` | `motion.*`, `Reveal`, hooks, `<Transport>`/`<Sequence>`/`<Track>`/`<Tween>`/`<Marker>`/`<Cue>`/`<Region>` |
+| `@dhaakon/motion/three` | `threeOutput`, `objectTrack`, `uniformTrack`, `cameraTrack`, `frameCapture` (peer: `three`, type-only import) |
+| `@dhaakon/motion/audio` | `audioClock`, `AudioClip`, `audioOutput`, `paramTrack`, `renderAudio` (Web Audio, no npm dependency) |
+| `@dhaakon/motion/midi` | `midi.*` byte builders, `midiOutput`, `noteCue` (Web MIDI, no npm dependency) |
+| `@dhaakon/motion/testing` | `ManualDriver`, `createTestScheduler`, `installFrameDriver`, `expectSample`, `snapshotTimeline`, `sample`, `stepFrames`, `runUntil`, audio/MIDI fakes |
+| `@dhaakon/motion/devtools` | `mountInspector` — a plain-DOM transport bar + timeline lanes overlay |
+
+## Compatibility notes (0.4)
+
+Everything above 0.3 keeps working unchanged, with two documented exceptions:
+
+- Playing a **nested** timeline directly now throws (`Timeline.add()` didn't exist before 0.4, so this can only affect code already updated to nest timelines) — control the composition through its root `Transport` instead.
+- `Transport.seek()` fires any cue it crosses by default (pass `{ cues: 'skip' }` to suppress); this is a new method, not a change to `Timeline.seek(progress)`, which keeps its 0–1 fraction signature exactly as before.
