@@ -322,7 +322,7 @@ var Tween = class {
     return Math.ceil(Math.max(0, this.elapsed - this.delay) / 1e3 * fps);
   }
   get activeDuration() {
-    return this.duration * (this.repeat + 1) + this.repeatDelay * this.repeat;
+    return this.repeat === Infinity ? Infinity : this.duration * (this.repeat + 1) + this.repeatDelay * this.repeat;
   }
   get totalDuration() {
     return this.delay + this.activeDuration;

@@ -81,7 +81,7 @@ export class Tween<T extends MotionValueShape = number> {
   seekTime(milliseconds: number) { this.elapsed = Math.max(0, Math.min(this.totalDuration, milliseconds)); this.sampleAt(this.elapsed); if (this.isAnimating) this.startedAt = this.frameLoop.now() - this.elapsed; return this; }
   setDuration(duration: number) { this.duration = Math.max(0, duration); return this; }
   getCurrentFrame(fps = 60) { return Math.ceil((Math.max(0, this.elapsed - this.delay) / 1000) * fps); }
-  get activeDuration() { return this.duration * (this.repeat + 1) + this.repeatDelay * this.repeat; }
+  get activeDuration() { return this.repeat === Infinity ? Infinity : this.duration * (this.repeat + 1) + this.repeatDelay * this.repeat; }
   get totalDuration() { return this.delay + this.activeDuration; }
 
   sampleAt(milliseconds: number, notify = true) {

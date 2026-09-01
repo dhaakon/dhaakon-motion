@@ -48,3 +48,11 @@ test('alternate direction returns to its starting value', () => {
   tween.sampleAt(100); assert.equal(tween.value, 10);
   tween.sampleAt(200); assert.equal(tween.value, 0);
 });
+
+test('infinite repeat remains finite and stays on the frame loop', () => {
+  const driver = new ManualDriver(); const loop = new FrameScheduler(driver);
+  const tween = new Tween({ from: 0, to: 1, duration: 1000, repeat: Infinity, yoyo: true, easing: 'linear', scheduler: loop }).play();
+  driver.step(500); assert.equal(tween.value, 0.5); assert.equal(tween.state, 'running');
+  driver.step(1500); assert.equal(tween.value, 0.5); assert.equal(tween.state, 'running');
+  assert.ok(Number.isFinite(tween.value)); assert.equal(loop.size, 1);
+});
