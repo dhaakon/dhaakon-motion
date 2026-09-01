@@ -1,16 +1,36 @@
 {
   "name": "@dhaakon/motion",
-  "version": "0.1.0",
-  "description": "Small, dependency-free tween and timeline primitives for Dhaakon interfaces.",
+  "version": "0.2.0",
+  "description": "Optimized tween, timeline, and React composition primitives for the Dhaakon network.",
   "type": "module",
   "license": "MIT",
+  "sideEffects": false,
   "files": ["dist", "README.md"],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs" }
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs" },
+    "./react": { "types": "./dist/react.d.ts", "import": "./dist/react.js", "require": "./dist/react.cjs" }
   },
   "publishConfig": { "registry": "http://dhaakon-ubuntu:21760/" },
-  "scripts": { "test": "node --test", "build": "cp src/index.js dist/index.js && cp src/index.cjs dist/index.cjs" }
+  "scripts": {
+    "build": "tsup",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "docs:dev": "vite --config docs/vite.config.ts --host 0.0.0.0",
+    "docs:build": "vite build --config docs/vite.config.ts"
+  },
+  "peerDependencies": { "react": ">=18", "react-dom": ">=18" },
+  "peerDependenciesMeta": { "react": { "optional": true }, "react-dom": { "optional": true } },
+  "devDependencies": {
+    "@dhaakon/ui": "0.2.0",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tsup": "^8.5.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1"
+  }
 }
