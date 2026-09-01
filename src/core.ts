@@ -1,9 +1,10 @@
 import { type EasingFunction, type EasingName, resolveEasing } from './easing';
 import { interpolate, type MotionValueShape } from './interpolate';
 import { scheduler, type FrameScheduler, type FrameTask } from './scheduler';
+import { sampleCycle, type Direction } from './cycle';
+import type { RenderContext, TimelineItem } from './items';
 
 export type TweenState = 'idle' | 'delayed' | 'running' | 'paused' | 'finished' | 'cancelled';
-export type Direction = 'normal' | 'reverse' | 'alternate' | 'alternate-reverse';
 export interface PropertyRange { start: number; end: number; unit?: string; }
 export interface TweenOptions<T extends MotionValueShape = number> {
   from?: T; to?: T; curve?: [T, T] | Line; properties?: Record<string, PropertyRange>; node?: HTMLElement | null;
@@ -24,8 +25,9 @@ export class Line {
   value(progress: number) { return interpolate(this.curves[0], this.curves[1], progress); }
 }
 
-export class Tween<T extends MotionValueShape = number> {
+export class Tween<T extends MotionValueShape = number> implements TimelineItem {
   static Line = Line;
+  readonly kind = 'tween' as const;
   duration = 300; delay = 0; repeat = 0; repeatDelay = 0; direction: Direction = 'normal';
   state: TweenState = 'idle'; isAnimating = false; isPaused = false; isReversed = false;
   node: HTMLElement | null = null; properties?: Record<string, PropertyRange>;
@@ -95,21 +97,17 @@ export class Tween<T extends MotionValueShape = number> {
   get activeDuration() { return this.repeat === Infinity ? Infinity : this.duration * (this.repeat + 1) + this.repeatDelay * this.repeat; }
   get totalDuration() { return this.delay + this.activeDuration; }
 
-  sampleAt(milliseconds: number, notify = true) {
-    const active = Math.max(0, milliseconds - this.delay);
-    const cycleDuration = this.duration + this.repeatDelay;
-    const iteration = this.duration === 0 ? this.repeat : Math.min(this.repeat, Math.floor(active / Math.max(1, cycleDuration)));
-    const cycleTime = Math.min(this.duration, Math.max(0, active - iteration * cycleDuration));
-    let raw = this.duration === 0 ? 1 : cycleTime / this.duration;
-    const alternating = this.direction === 'alternate' || this.direction === 'alternate-reverse';
-    const startsReverse = this.direction === 'reverse' || this.direction === 'alternate-reverse';
-    if (startsReverse !== (alternating && iteration % 2 === 1) !== this.isReversed) raw = 1 - raw;
-    this.progress = Math.max(0, Math.min(1, raw));
+  sampleAt(milliseconds: number, _ctx?: RenderContext) {
+    const { progress } = sampleCycle(
+      { duration: this.duration, delay: this.delay, repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction, reversed: this.isReversed },
+      milliseconds,
+    );
+    this.progress = progress;
     this.value = interpolate(this.from, this.toValue, this.easing(this.progress));
     if (this.node && this.properties && typeof this.value === 'object' && !Array.isArray(this.value)) {
       for (const [key, value] of Object.entries(this.value)) this.node.style.setProperty(key, `${value}${this.properties[key]?.unit ?? ''}`);
     }
-    if (notify) this.onUpdate?.(this.value, this.progress, this);
+    this.onUpdate?.(this.value, this.progress, this);
     return this.value;
   }
 

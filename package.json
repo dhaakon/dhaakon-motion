@@ -1,39 +1,99 @@
 {
   "name": "@dhaakon/motion",
   "version": "0.3.2",
-  "description": "Optimized tween, timeline, and React composition primitives for the Dhaakon network.",
+  "description": "Optimized tween, timeline, transport, and React composition primitives for the Dhaakon network.",
   "type": "module",
   "license": "MIT",
   "sideEffects": false,
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs" },
-    "./react": { "types": "./dist/react.d.ts", "import": "./dist/react.js", "require": "./dist/react.cjs" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js",
+      "require": "./dist/react.cjs"
+    },
+    "./three": {
+      "types": "./dist/three.d.ts",
+      "import": "./dist/three.js",
+      "require": "./dist/three.cjs"
+    },
+    "./audio": {
+      "types": "./dist/audio.d.ts",
+      "import": "./dist/audio.js",
+      "require": "./dist/audio.cjs"
+    },
+    "./midi": {
+      "types": "./dist/midi.d.ts",
+      "import": "./dist/midi.js",
+      "require": "./dist/midi.cjs"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "require": "./dist/testing.cjs"
+    },
+    "./devtools": {
+      "types": "./dist/devtools.d.ts",
+      "import": "./dist/devtools.js",
+      "require": "./dist/devtools.cjs"
+    }
   },
-  "publishConfig": { "registry": "http://dhaakon-ubuntu:21760/" },
+  "publishConfig": {
+    "registry": "http://dhaakon-ubuntu:21760/"
+  },
   "scripts": {
     "build": "tsup",
-    "test": "npm run build && node --test tests/*.test.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:dist": "npm run build && node --test tests/dist/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run test && npm run test:dist",
     "docs:dev": "vite --config docs/vite.config.ts --host 0.0.0.0",
     "docs:build": "vite build --config docs/vite.config.ts"
   },
-  "peerDependencies": { "react": ">=18", "react-dom": ">=18" },
-  "peerDependenciesMeta": { "react": { "optional": true }, "react-dom": { "optional": true } },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18",
+    "three": ">=0.150.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "three": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@dhaakon/ui": "0.2.0",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.1.0",
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.185.0",
     "@vitejs/plugin-react": "^5.2.0",
+    "jsdom": "^25.0.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "three": "^0.185.1",
     "tsup": "^8.5.0",
     "typescript": "~5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vitest": "^4.1.11"
   }
 }

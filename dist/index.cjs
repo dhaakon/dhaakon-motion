@@ -26,15 +26,19 @@ __export(src_exports, {
   MotionValue: () => MotionValue,
   Timeline: () => Timeline,
   Tween: () => Tween,
+  activeDuration: () => activeDuration,
   animate: () => animate,
   cubicBezier: () => cubicBezier,
   default: () => src_default,
+  defaultRenderContext: () => defaultRenderContext,
   interpolate: () => interpolate,
   mix: () => mix,
   resolveEasing: () => resolveEasing,
+  sampleCycle: () => sampleCycle,
   scheduler: () => scheduler,
   spring: () => spring,
-  stagger: () => stagger
+  stagger: () => stagger,
+  totalDuration: () => totalDuration
 });
 module.exports = __toCommonJS(src_exports);
 
@@ -174,6 +178,13 @@ var FrameScheduler = class {
     if (this.frame != null) this.driver.cancel(this.frame);
     this.frame = null;
   }
+  /** Swap the underlying time/frame source (used by tests). Cancels any pending frame and re-wakes on the new driver if tasks are active. */
+  setDriver(driver2) {
+    if (this.frame != null) this.driver.cancel(this.frame);
+    this.frame = null;
+    this.driver = driver2;
+    if (this.tasks.size) this.wake();
+  }
   wake() {
     if (this.frame == null) this.frame = this.driver.request(this.tick);
   }
@@ -185,6 +196,27 @@ var FrameScheduler = class {
 };
 var globalThisDriver = driver;
 var scheduler = new FrameScheduler(globalThisDriver);
+
+// src/cycle.ts
+function activeDuration(spec) {
+  if (spec.repeat === Infinity) return Infinity;
+  return spec.duration * (spec.repeat + 1) + spec.repeatDelay * spec.repeat;
+}
+function totalDuration(spec) {
+  return spec.delay + activeDuration(spec);
+}
+function sampleCycle(spec, milliseconds) {
+  const active = Math.max(0, milliseconds - spec.delay);
+  const cycleDuration = spec.duration + spec.repeatDelay;
+  const iteration = spec.duration === 0 ? spec.repeat : Math.min(spec.repeat, Math.floor(active / Math.max(1, cycleDuration)));
+  const cycleTime = Math.min(spec.duration, Math.max(0, active - iteration * cycleDuration));
+  let raw = spec.duration === 0 ? 1 : cycleTime / spec.duration;
+  const alternating = spec.direction === "alternate" || spec.direction === "alternate-reverse";
+  const startsReverse = spec.direction === "reverse" || spec.direction === "alternate-reverse";
+  if (startsReverse !== (alternating && iteration % 2 === 1) !== spec.reversed) raw = 1 - raw;
+  const progress = Math.max(0, Math.min(1, raw));
+  return { iteration, cycleTime, progress, active };
+}
 
 // src/core.ts
 var Line = class {
@@ -199,6 +231,7 @@ var Line = class {
 };
 var Tween = class {
   static Line = Line;
+  kind = "tween";
   duration = 300;
   delay = 0;
   repeat = 0;
@@ -334,21 +367,17 @@ var Tween = class {
   get totalDuration() {
     return this.delay + this.activeDuration;
   }
-  sampleAt(milliseconds, notify = true) {
-    const active = Math.max(0, milliseconds - this.delay);
-    const cycleDuration = this.duration + this.repeatDelay;
-    const iteration = this.duration === 0 ? this.repeat : Math.min(this.repeat, Math.floor(active / Math.max(1, cycleDuration)));
-    const cycleTime = Math.min(this.duration, Math.max(0, active - iteration * cycleDuration));
-    let raw = this.duration === 0 ? 1 : cycleTime / this.duration;
-    const alternating = this.direction === "alternate" || this.direction === "alternate-reverse";
-    const startsReverse = this.direction === "reverse" || this.direction === "alternate-reverse";
-    if (startsReverse !== (alternating && iteration % 2 === 1) !== this.isReversed) raw = 1 - raw;
-    this.progress = Math.max(0, Math.min(1, raw));
+  sampleAt(milliseconds, _ctx) {
+    const { progress } = sampleCycle(
+      { duration: this.duration, delay: this.delay, repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction, reversed: this.isReversed },
+      milliseconds
+    );
+    this.progress = progress;
     this.value = interpolate(this.from, this.toValue, this.easing(this.progress));
     if (this.node && this.properties && typeof this.value === "object" && !Array.isArray(this.value)) {
       for (const [key, value] of Object.entries(this.value)) this.node.style.setProperty(key, `${value}${this.properties[key]?.unit ?? ""}`);
     }
-    if (notify) this.onUpdate?.(this.value, this.progress, this);
+    this.onUpdate?.(this.value, this.progress, this);
     return this.value;
   }
   advance = (time) => {
@@ -502,6 +531,9 @@ function stagger(interval = 60, { start = 0 } = {}) {
   return (index) => start + index * interval;
 }
 
+// src/items.ts
+var defaultRenderContext = { direction: 1, fireCues: true };
+
 // src/index.ts
 var src_default = { Tween, Timeline, Line, MotionValue, animate, stagger, Easing, cubicBezier, spring };
 // Annotate the CommonJS export names for ESM import in node:
@@ -512,13 +544,17 @@ var src_default = { Tween, Timeline, Line, MotionValue, animate, stagger, Easing
   MotionValue,
   Timeline,
   Tween,
+  activeDuration,
   animate,
   cubicBezier,
+  defaultRenderContext,
   interpolate,
   mix,
   resolveEasing,
+  sampleCycle,
   scheduler,
   spring,
-  stagger
+  stagger,
+  totalDuration
 });
 //# sourceMappingURL=index.cjs.map
