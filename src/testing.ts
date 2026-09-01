@@ -1,6 +1,8 @@
 import { FrameScheduler, scheduler, type FrameDriver } from './scheduler';
-import type { Tween } from './core';
+import { Tween } from './core';
 import type { MotionValueShape } from './interpolate';
+import { Timeline } from './timeline';
+import { frameRate, parseTime, type FrameRateInput, type TimeInput } from './time';
 
 /**
  * A fully controllable `FrameDriver`: nothing runs until `step`/`advance` is
@@ -69,4 +71,57 @@ export function recordValues<T extends MotionValueShape>(tween: Tween<T>): T[] {
     previous?.(value, progress, instance);
   };
   return values;
+}
+
+/** Advance a `ManualDriver` by exactly `n` frames at `frameRate`, stepping the scheduler once per frame. */
+export function stepFrames(driver: ManualDriver, n: number, frameRateInput: FrameRateInput) {
+  const rate = frameRate(frameRateInput);
+  for (let i = 1; i <= n; i += 1) driver.advance(1000 * rate.den / rate.num);
+}
+
+/** Step `driver` (at most `maxFrames` frames of `frameRateInput`) until `predicate()` is true. Throws if it never is. */
+export function runUntil(driver: ManualDriver, predicate: () => boolean, options: { maxFrames?: number; frameRate?: FrameRateInput } = {}) {
+  const maxFrames = options.maxFrames ?? 10000;
+  const rate = frameRate(options.frameRate ?? 60);
+  for (let i = 0; i < maxFrames; i += 1) {
+    if (predicate()) return;
+    driver.advance(1000 * rate.den / rate.num);
+  }
+  if (!predicate()) throw new Error(`runUntil: predicate was still false after ${maxFrames} frames`);
+}
+
+/**
+ * Sample every `Tween` in a timeline's tree at each of `times` (absolute, or
+ * any `TimeInput` form given `frameRateInput`/the timeline's own frame rate),
+ * keyed by name (or a positional path when unnamed). A stopgap until phase 5's
+ * bound `Track`/cue-sheet targets make named sampling exact.
+ */
+export function sample(timeline: Timeline, times: TimeInput[], frameRateInput?: FrameRateInput): Array<{ time: number; values: Record<string, unknown> }> {
+  const rate = frameRateInput ? frameRate(frameRateInput) : timeline.frameRate;
+  return times.map((input) => {
+    const ms = typeof input === 'number' ? input : parseTime(input, rate);
+    timeline.sampleAt(ms);
+    return { time: ms, values: collectTweenValues(timeline, '') };
+  });
+}
+
+function collectTweenValues(timeline: Timeline, prefix: string): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  timeline.items.forEach((entry, index) => {
+    const key = entry.item.name ?? `${prefix}${index}`;
+    if (entry.item instanceof Timeline) Object.assign(values, collectTweenValues(entry.item, `${key}.`));
+    else if (entry.item instanceof Tween) values[key] = entry.item.value;
+  });
+  return values;
+}
+
+/** A snapshot-friendly view of a timeline: its ASCII rendering, inspection tree, and a value table at `times` (default: start, mid, end). */
+export function snapshotTimeline(timeline: Timeline, times?: TimeInput[]) {
+  const duration = Number.isFinite(timeline.totalDuration) ? timeline.totalDuration : timeline.duration;
+  const sampleTimes = times ?? [0, duration / 2, duration];
+  return {
+    ascii: timeline.toAscii(),
+    inspect: timeline.inspect(),
+    samples: sample(timeline, sampleTimes),
+  };
 }

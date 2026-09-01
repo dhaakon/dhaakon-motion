@@ -8,6 +8,8 @@ export * from './time';
 export * from './timecode';
 export * from './timeline';
 export * from './transport';
+export * from './trace';
+export * from './offline';
 import { Tween, Line, MotionValue, animate, stagger } from './core';
 import { Timeline } from './timeline';
 import { Transport } from './transport';

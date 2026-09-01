@@ -190,18 +190,18 @@ function parseTimecode(text, rate) {
   const hours = Number(h);
   const minutes = Number(m);
   const seconds = Number(s);
-  const frames = Number(f);
+  const frames2 = Number(f);
   const fpsRounded = Math.round(rate.fps);
   if (minutes > 59 || seconds > 59) throw new Error(`Invalid timecode "${text}": minutes and seconds must be 0-59`);
-  if (frames >= fpsRounded) throw new Error(`Invalid timecode "${text}": frames must be 0-${fpsRounded - 1} at ${rate.label}`);
+  if (frames2 >= fpsRounded) throw new Error(`Invalid timecode "${text}": frames must be 0-${fpsRounded - 1} at ${rate.label}`);
   if (rate.dropFrame) {
     const df = dropCount(fpsRounded);
-    const isDroppedInstant = minutes % 10 !== 0 && seconds === 0 && frames < df;
+    const isDroppedInstant = minutes % 10 !== 0 && seconds === 0 && frames2 < df;
     if (isDroppedInstant) {
-      throw new Error(`Invalid drop-frame timecode "${text}": frame ${frames} is dropped at the start of minute ${minutes}`);
+      throw new Error(`Invalid drop-frame timecode "${text}": frame ${frames2} is dropped at the start of minute ${minutes}`);
     }
   }
-  return { hours, minutes, seconds, frames, dropFrame };
+  return { hours, minutes, seconds, frames: frames2, dropFrame };
 }
 function timecodeToFrames(tc, rate) {
   const fpsRounded = Math.round(rate.fps);
@@ -252,8 +252,8 @@ function timecodeToMs(input, rate) {
   const tc = typeof input === "string" ? parseTimecode(input, rate) : input;
   return frameToMs(timecodeToFrames(tc, rate), rate);
 }
-function addFrames(tc, frames, rate) {
-  return framesToTimecode(timecodeToFrames(tc, rate) + frames, rate);
+function addFrames(tc, frames2, rate) {
+  return framesToTimecode(timecodeToFrames(tc, rate) + frames2, rate);
 }
 
 // src/time.ts
@@ -369,6 +369,7 @@ var Line = class {
 var Tween = class {
   static Line = Line;
   kind = "tween";
+  name;
   duration = 300;
   delay = 0;
   repeat = 0;
@@ -585,6 +586,42 @@ function stagger(interval = 60, { start = 0 } = {}) {
 // src/items.ts
 var defaultRenderContext = { direction: 1, fireCues: true };
 
+// src/trace.ts
+var wallNow = () => globalThis.performance?.now?.() ?? Date.now();
+function createTrace(options = {}) {
+  const capacity = Math.max(1, options.capacity ?? 200);
+  let tickCount = 0;
+  let state = "idle";
+  let lastTickAt = null;
+  const trace = {
+    name: "trace",
+    entries: [],
+    onStateChange(next) {
+      state = next;
+    },
+    onTick(info) {
+      const now2 = wallNow();
+      const durationMs = lastTickAt == null ? 0 : now2 - lastTickAt;
+      lastTickAt = now2;
+      trace.entries.push({ tick: tickCount, time: info.time, frame: info.frame, rate: info.rate, state, cues: info.cues ?? [], durationMs });
+      if (trace.entries.length > capacity) trace.entries.splice(0, trace.entries.length - capacity);
+      tickCount += 1;
+    },
+    clear() {
+      trace.entries.length = 0;
+      tickCount = 0;
+      lastTickAt = null;
+    },
+    toText() {
+      return trace.entries.map((entry) => {
+        const cues = entry.cues.length ? ` cues=[${entry.cues.join(", ")}]` : "";
+        return `#${entry.tick} t=${entry.time.toFixed(1)}ms f=${entry.frame} rate=${entry.rate} state=${entry.state}${cues}`;
+      }).join("\n");
+    }
+  };
+  return trace;
+}
+
 // src/transport.ts
 var Transport = class {
   frameRate;
@@ -605,6 +642,7 @@ var Transport = class {
   explicitDuration;
   removeFrame;
   outputs = /* @__PURE__ */ new Set();
+  pendingCueNames = null;
   listeners = /* @__PURE__ */ new Set();
   loopListeners = /* @__PURE__ */ new Set();
   resolveFinished;
@@ -616,6 +654,7 @@ var Transport = class {
     this._rate = options.rate ?? 1;
     this.snap = options.snap ?? false;
     this.root = options.root ?? new Timeline({ scheduler: options.scheduler });
+    this.root.bindTransport(this);
     if (options.duration != null) this.explicitDuration = parseTime(options.duration, this.frameRate);
     this.finished = this.newFinished();
     if (options.loop) this.setLoop(options.loop);
@@ -665,6 +704,12 @@ var Transport = class {
     return () => {
       this.loopListeners.delete(listener);
     };
+  }
+  /** Attach a ring-buffer trace output that records every tick (and the cues that fired during it). */
+  trace(options = {}) {
+    const trace = createTrace(options);
+    this.attach(trace);
+    return trace;
   }
   play() {
     if (this._state === "playing") return this;
@@ -717,9 +762,9 @@ var Transport = class {
   seekTimecode(tc) {
     return this.seek(tc);
   }
-  step(frames = 1) {
+  step(frames2 = 1) {
     this.pause();
-    return this.seekFrame(this.frame + frames);
+    return this.seekFrame(this.frame + frames2);
   }
   setRate(rate) {
     if (this._state === "playing") {
@@ -828,7 +873,9 @@ var Transport = class {
       direction,
       frameRate: this.frameRate
     };
+    this.pendingCueNames = null;
     this.root.sampleAt(quantized, { direction, fireCues, frame: info, transport: this });
+    if (this.pendingCueNames) info.cues = this.pendingCueNames;
     for (const output of this.outputs) {
       try {
         output.onTick?.(info);
@@ -838,6 +885,10 @@ var Transport = class {
     }
     for (const listener of this.listeners) listener(info, this);
     this.lastRenderedTime = quantized;
+  }
+  /** Records that a cue fired during the current tick (called by `Timeline`). Not usually called directly. */
+  noteCue(name) {
+    (this.pendingCueNames ??= []).push(name);
   }
   frameSnap(ms) {
     return frameToMs(msToFrame(ms, this.frameRate), this.frameRate);
@@ -933,6 +984,14 @@ var Timeline = class _Timeline {
     while (node.parentTimeline) node = node.parentTimeline;
     return node.ownTransport;
   }
+  /** Called by a `Transport`'s constructor when it adopts this timeline as its `root` (including its own default root). Not usually called directly. */
+  bindTransport(transport) {
+    if (this.parentTimeline) throw new Error(this.nestedError());
+    if (this.ownTransport && this.ownTransport !== transport) {
+      throw new Error(`Timeline${this.name ? ` "${this.name}"` : ""} already has its own transport (it was played directly, or is already another transport's root).`);
+    }
+    this.ownTransport = transport;
+  }
   label(name, at = this.cursor) {
     const time = this.resolvePosition(at, this.entries.at(-1));
     this.labels.set(name, time);
@@ -1027,6 +1086,89 @@ var Timeline = class _Timeline {
   }
   previousMarker(fromMs = this.lastCycleTime ?? 0) {
     return [...this.markers].reverse().find((marker) => marker.time < fromMs);
+  }
+  // ---- inspection -----------------------------------------------------------
+  inspect() {
+    return this.inspectAsChild(0, this.totalDuration);
+  }
+  inspectAsChild(start, end) {
+    return {
+      kind: this.kind,
+      name: this.name,
+      start,
+      end,
+      duration: this.duration,
+      totalDuration: this.totalDuration,
+      repeat: this.options.repeat ?? 0,
+      direction: this.options.yoyo ? "alternate" : "normal",
+      startTimecode: formatTimecode(msToTimecode(start, this.frameRate)),
+      children: this.entries.map((entry) => entry.item instanceof _Timeline ? entry.item.inspectAsChild(entry.start, entry.end) : {
+        kind: entry.item.kind,
+        name: entry.item.name,
+        start: entry.start,
+        end: entry.end,
+        duration: entry.item.totalDuration,
+        totalDuration: entry.item.totalDuration,
+        repeat: 0,
+        direction: "normal",
+        children: [],
+        markers: [],
+        cues: []
+      }),
+      markers: this.markers,
+      cues: this.cues
+    };
+  }
+  /** A stable, human-readable rendering of the tree, its markers, and its cues. */
+  toAscii(options = {}) {
+    const width = Math.max(10, options.width ?? 60);
+    const root = this.inspect();
+    const total = Math.max(1, Number.isFinite(root.totalDuration) ? root.totalDuration : root.duration);
+    const scale = (t) => Math.max(0, Math.min(width, Math.round(Math.min(t, total) / total * width)));
+    const lines = [`${this.name ?? "timeline"}  0 .. ${Math.round(total)}ms`];
+    const renderNode = (node, depth, isLast, prefix) => {
+      const connector = depth === 0 ? "" : isLast ? "\u2514 " : "\u251C ";
+      const barStart = scale(node.start);
+      const barEnd = Math.max(barStart + 1, scale(node.end));
+      const bar = `${" ".repeat(barStart)}${"\u2588".repeat(Math.min(width, barEnd) - barStart)}`;
+      const label = (node.name ?? node.kind).padEnd(10);
+      lines.push(`${prefix}${connector}${label} ${node.kind.padEnd(8)} ${bar}`);
+      const childPrefix = depth === 0 ? "" : `${prefix}${isLast ? "  " : "\u2502 "}`;
+      node.children.forEach((child, index) => renderNode(child, depth + 1, index === node.children.length - 1, childPrefix));
+    };
+    root.children.forEach((child, index) => renderNode(child, 1, index === root.children.length - 1, ""));
+    if (options.labels !== false) {
+      const markerText = this.markers.map((marker) => `\u25C6 ${marker.name} @ ${Math.round(marker.time)}`).join("   ");
+      const cueText = this.cues.map((cue) => `\u25CF ${cue.name} @ ${Math.round(cue.time)}`).join("   ");
+      if (markerText) lines.push(markerText);
+      if (cueText) lines.push(cueText);
+    }
+    return lines.join("\n");
+  }
+  /** How a position string resolved: its absolute time, and (for a label/anchor form) the base it was measured from. */
+  explain(position) {
+    const previous = this.entries.at(-1);
+    const ms = this.resolvePosition(position, previous);
+    const result = {
+      ms,
+      frame: msToFrame(ms, this.frameRate),
+      timecode: formatTimecode(msToTimecode(ms, this.frameRate))
+    };
+    if (typeof position === "string") {
+      const text = position.trim();
+      const anchorMatch = text.match(ANCHOR_RE);
+      if (anchorMatch) {
+        result.base = anchorMatch[1];
+        if (anchorMatch[3]) result.offset = parseTime(anchorMatch[3], this.frameRate) * (anchorMatch[2] === "+=" ? 1 : -1);
+      } else {
+        const labelMatch = text.match(LABEL_OFFSET_RE);
+        if (labelMatch) {
+          result.base = labelMatch[1];
+          result.offset = parseTime(labelMatch[3], this.frameRate) * (labelMatch[2] === "+=" ? 1 : -1);
+        }
+      }
+    }
+    return result;
   }
   // ---- playback (root timelines only) --------------------------------------
   nestedError() {
@@ -1141,6 +1283,7 @@ var Timeline = class _Timeline {
       const event = { name: point.name, time: point.time, direction: forward ? 1 : -1, payload: point.payload, timeline: this, frame: ctx.frame };
       try {
         handler(event);
+        this.rootTransport?.noteCue(point.name);
       } catch (err) {
         (this.rootTransport?.onError ?? defaultOnError)(err);
       }
@@ -1156,19 +1299,100 @@ var Timeline = class _Timeline {
       const [, anchor, op, offsetText] = anchorMatch;
       const base2 = anchor === "<" ? previous?.start ?? 0 : previous?.end ?? 0;
       if (!op) return Math.max(0, base2);
-      return Math.max(0, base2 + parseTime(offsetText, this.rateInput) * (op === "+=" ? 1 : -1));
+      return Math.max(0, base2 + parseTime(offsetText, this.frameRate) * (op === "+=" ? 1 : -1));
     }
-    if (TIME_LITERAL_RE.test(text)) return Math.max(0, parseTime(text, this.rateInput));
+    if (TIME_LITERAL_RE.test(text)) return Math.max(0, parseTime(text, this.frameRate));
     const labelMatch = text.match(LABEL_OFFSET_RE);
     const labelName = labelMatch ? labelMatch[1] : text;
     const base = this.labels.get(labelName);
     if (base == null) throw new Error(`Unknown timeline label: ${at}`);
     if (!labelMatch) return Math.max(0, base);
-    return Math.max(0, base + parseTime(labelMatch[3], this.rateInput) * (labelMatch[2] === "+=" ? 1 : -1));
+    return Math.max(0, base + parseTime(labelMatch[3], this.frameRate) * (labelMatch[2] === "+=" ? 1 : -1));
   }
 };
 function defaultOnError(err) {
   console.error(err);
+}
+
+// src/offline.ts
+var OfflineTransport = class extends Transport {
+  attach(output) {
+    return attachForOffline(this, output, (o) => super.attach(o));
+  }
+};
+function resolveOfflineTransport(source, options) {
+  if (source instanceof Transport) return source;
+  return new OfflineTransport({ root: source, frameRate: options.frameRate ?? source.frameRate });
+}
+var warnedOffline = /* @__PURE__ */ new WeakSet();
+function attachForOffline(transport, output, doAttach = (o) => transport.attach(o)) {
+  if (output.supportsOffline === false) {
+    if (!warnedOffline.has(output)) {
+      warnedOffline.add(output);
+      console.warn(`renderFrames/frames: output${output.name ? ` "${output.name}"` : ""} does not support offline rendering and was skipped.`);
+    }
+    return () => {
+    };
+  }
+  return doAttach(output);
+}
+function resolveRange(transport, rate, options) {
+  const from = options.from != null ? parseTime(options.from, rate) : 0;
+  const to = options.to != null ? parseTime(options.to, rate) : transport.duration;
+  if (!Number.isFinite(to)) throw new Error("renderFrames/frames: the transport has an infinite duration; pass an explicit `to`.");
+  return { from, to };
+}
+async function renderFrames(source, onFrame, options = {}) {
+  const transport = resolveOfflineTransport(source, options);
+  const rate = options.frameRate ? frameRate(options.frameRate) : transport.frameRate;
+  const { from, to } = resolveRange(transport, rate, options);
+  const detachers = (options.outputs ?? []).map((output) => attachForOffline(transport, output));
+  let latest;
+  const unsubscribe = transport.subscribe((info) => {
+    latest = info;
+  });
+  try {
+    if (from <= 0) transport.root.reset?.();
+    transport.seek(from, { cues: "skip" });
+    const startFrame = msToFrame(from, rate);
+    const endFrame = msToFrame(to, rate);
+    let count = 0;
+    for (let frame = startFrame; frame <= endFrame; frame += 1) {
+      if (options.signal?.aborted) break;
+      transport.seek(frameToMs(frame, rate), { cues: "fire" });
+      const result = onFrame(latest);
+      if (result) await result;
+      count += 1;
+      if (options.yieldEvery && count % options.yieldEvery === 0) await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    }
+    return { frames: count, from, to };
+  } finally {
+    unsubscribe();
+    for (const detach of detachers) detach();
+  }
+}
+function* frames(source, options = {}) {
+  const transport = resolveOfflineTransport(source, options);
+  const rate = options.frameRate ? frameRate(options.frameRate) : transport.frameRate;
+  const { from, to } = resolveRange(transport, rate, options);
+  let latest;
+  const unsubscribe = transport.subscribe((info) => {
+    latest = info;
+  });
+  try {
+    if (from <= 0) transport.root.reset?.();
+    transport.seek(from, { cues: "skip" });
+    const startFrame = msToFrame(from, rate);
+    const endFrame = msToFrame(to, rate);
+    for (let frame = startFrame; frame <= endFrame; frame += 1) {
+      transport.seek(frameToMs(frame, rate), { cues: "fire" });
+      yield latest;
+    }
+  } finally {
+    unsubscribe();
+  }
 }
 
 // src/index.ts
@@ -1179,12 +1403,14 @@ export {
   FrameScheduler,
   Line,
   MotionValue,
+  OfflineTransport,
   Timeline,
   Transport,
   Tween,
   activeDuration,
   addFrames,
   animate,
+  createTrace,
   cubicBezier,
   src_default as default,
   defaultRenderContext,
@@ -1192,6 +1418,7 @@ export {
   formatTimecode,
   frameRate,
   frameToMs,
+  frames,
   framesToTimecode,
   interpolate,
   mix,
@@ -1199,6 +1426,7 @@ export {
   msToTimecode,
   parseTime,
   parseTimecode,
+  renderFrames,
   resolveEasing,
   sampleCycle,
   scheduler,

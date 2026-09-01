@@ -3,9 +3,24 @@ import type { MotionValueShape } from './interpolate';
 import { sampleCycle, totalDuration as cycleTotalDuration, type Direction } from './cycle';
 import { defaultRenderContext, type CueEvent, type CueOptions, type Marker, type RenderContext, type TimelineItem } from './items';
 import { frameRate, msToFrame, parseTime, type FrameRateInput } from './time';
-import { msToTimecode } from './timecode';
+import { formatTimecode, msToTimecode } from './timecode';
 import type { FrameScheduler } from './scheduler';
 import { Transport } from './transport';
+
+export interface InspectNode {
+  kind: string;
+  name?: string;
+  start: number;
+  end: number;
+  duration: number;
+  totalDuration: number;
+  repeat: number;
+  direction: string;
+  startTimecode?: string;
+  children: InspectNode[];
+  markers: readonly Marker[];
+  cues: readonly { name: string; time: number }[];
+}
 
 export interface TimelineOptions {
   name?: string;
@@ -90,6 +105,14 @@ export class Timeline implements TimelineItem {
     let node: Timeline = this;
     while (node.parentTimeline) node = node.parentTimeline;
     return node.ownTransport;
+  }
+  /** Called by a `Transport`'s constructor when it adopts this timeline as its `root` (including its own default root). Not usually called directly. */
+  bindTransport(transport: Transport) {
+    if (this.parentTimeline) throw new Error(this.nestedError());
+    if (this.ownTransport && this.ownTransport !== transport) {
+      throw new Error(`Timeline${this.name ? ` "${this.name}"` : ''} already has its own transport (it was played directly, or is already another transport's root).`);
+    }
+    this.ownTransport = transport;
   }
 
   label(name: string, at: TimelinePosition = this.cursor) {
@@ -191,6 +214,74 @@ export class Timeline implements TimelineItem {
     return [...this.markers].reverse().find((marker) => marker.time < fromMs);
   }
 
+  // ---- inspection -----------------------------------------------------------
+  inspect(): InspectNode { return this.inspectAsChild(0, this.totalDuration); }
+  private inspectAsChild(start: number, end: number): InspectNode {
+    return {
+      kind: this.kind, name: this.name, start, end,
+      duration: this.duration, totalDuration: this.totalDuration,
+      repeat: this.options.repeat ?? 0, direction: this.options.yoyo ? 'alternate' : 'normal',
+      startTimecode: formatTimecode(msToTimecode(start, this.frameRate)),
+      children: this.entries.map((entry) => entry.item instanceof Timeline
+        ? entry.item.inspectAsChild(entry.start, entry.end)
+        : {
+          kind: entry.item.kind, name: entry.item.name, start: entry.start, end: entry.end,
+          duration: entry.item.totalDuration, totalDuration: entry.item.totalDuration,
+          repeat: 0, direction: 'normal', children: [], markers: [], cues: [],
+        }),
+      markers: this.markers,
+      cues: this.cues,
+    };
+  }
+
+  /** A stable, human-readable rendering of the tree, its markers, and its cues. */
+  toAscii(options: { width?: number; frameRate?: FrameRateInput; labels?: boolean } = {}): string {
+    const width = Math.max(10, options.width ?? 60);
+    const root = this.inspect();
+    const total = Math.max(1, Number.isFinite(root.totalDuration) ? root.totalDuration : root.duration);
+    const scale = (t: number) => Math.max(0, Math.min(width, Math.round((Math.min(t, total) / total) * width)));
+    const lines: string[] = [`${this.name ?? 'timeline'}  0 .. ${Math.round(total)}ms`];
+    const renderNode = (node: InspectNode, depth: number, isLast: boolean, prefix: string) => {
+      const connector = depth === 0 ? '' : (isLast ? '└ ' : '├ ');
+      const barStart = scale(node.start);
+      const barEnd = Math.max(barStart + 1, scale(node.end));
+      const bar = `${' '.repeat(barStart)}${'█'.repeat(Math.min(width, barEnd) - barStart)}`;
+      const label = (node.name ?? node.kind).padEnd(10);
+      lines.push(`${prefix}${connector}${label} ${node.kind.padEnd(8)} ${bar}`);
+      const childPrefix = depth === 0 ? '' : `${prefix}${isLast ? '  ' : '│ '}`;
+      node.children.forEach((child, index) => renderNode(child, depth + 1, index === node.children.length - 1, childPrefix));
+    };
+    root.children.forEach((child, index) => renderNode(child, 1, index === root.children.length - 1, ''));
+    if (options.labels !== false) {
+      const markerText = this.markers.map((marker) => `◆ ${marker.name} @ ${Math.round(marker.time)}`).join('   ');
+      const cueText = this.cues.map((cue) => `● ${cue.name} @ ${Math.round(cue.time)}`).join('   ');
+      if (markerText) lines.push(markerText);
+      if (cueText) lines.push(cueText);
+    }
+    return lines.join('\n');
+  }
+
+  /** How a position string resolved: its absolute time, and (for a label/anchor form) the base it was measured from. */
+  explain(position: TimelinePosition): { ms: number; frame: number; timecode: string; base?: string; offset?: number } {
+    const previous = this.entries.at(-1);
+    const ms = this.resolvePosition(position, previous);
+    const result: { ms: number; frame: number; timecode: string; base?: string; offset?: number } = {
+      ms, frame: msToFrame(ms, this.frameRate), timecode: formatTimecode(msToTimecode(ms, this.frameRate)),
+    };
+    if (typeof position === 'string') {
+      const text = position.trim();
+      const anchorMatch = text.match(ANCHOR_RE);
+      if (anchorMatch) {
+        result.base = anchorMatch[1];
+        if (anchorMatch[3]) result.offset = parseTime(anchorMatch[3], this.frameRate) * (anchorMatch[2] === '+=' ? 1 : -1);
+      } else {
+        const labelMatch = text.match(LABEL_OFFSET_RE);
+        if (labelMatch) { result.base = labelMatch[1]; result.offset = parseTime(labelMatch[3], this.frameRate) * (labelMatch[2] === '+=' ? 1 : -1); }
+      }
+    }
+    return result;
+  }
+
   // ---- playback (root timelines only) --------------------------------------
   private nestedError(): string {
     return `Timeline${this.name ? ` "${this.name}"` : ''} is nested; control its root transport instead.`;
@@ -284,7 +375,7 @@ export class Timeline implements TimelineItem {
       if (!handler) continue;
       point.fired = true;
       const event: CueEvent = { name: point.name, time: point.time, direction: forward ? 1 : -1, payload: point.payload, timeline: this, frame: ctx.frame };
-      try { handler(event); } catch (err) { (this.rootTransport?.onError ?? defaultOnError)(err); }
+      try { handler(event); this.rootTransport?.noteCue(point.name); } catch (err) { (this.rootTransport?.onError ?? defaultOnError)(err); }
     }
   }
 
@@ -299,17 +390,17 @@ export class Timeline implements TimelineItem {
       const [, anchor, op, offsetText] = anchorMatch;
       const base = anchor === '<' ? (previous?.start ?? 0) : (previous?.end ?? 0);
       if (!op) return Math.max(0, base);
-      return Math.max(0, base + parseTime(offsetText, this.rateInput) * (op === '+=' ? 1 : -1));
+      return Math.max(0, base + parseTime(offsetText, this.frameRate) * (op === '+=' ? 1 : -1));
     }
 
-    if (TIME_LITERAL_RE.test(text)) return Math.max(0, parseTime(text, this.rateInput));
+    if (TIME_LITERAL_RE.test(text)) return Math.max(0, parseTime(text, this.frameRate));
 
     const labelMatch = text.match(LABEL_OFFSET_RE);
     const labelName = labelMatch ? labelMatch[1] : text;
     const base = this.labels.get(labelName);
     if (base == null) throw new Error(`Unknown timeline label: ${at}`);
     if (!labelMatch) return Math.max(0, base);
-    return Math.max(0, base + parseTime(labelMatch[3], this.rateInput) * (labelMatch[2] === '+=' ? 1 : -1));
+    return Math.max(0, base + parseTime(labelMatch[3], this.frameRate) * (labelMatch[2] === '+=' ? 1 : -1));
   }
 }
 

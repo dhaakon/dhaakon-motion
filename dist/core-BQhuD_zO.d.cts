@@ -145,6 +145,23 @@ declare function timecodeToMs(input: string | Timecode, rate: FrameRate): number
 /** Add (or subtract, with a negative count) a number of frames to a timecode. */
 declare function addFrames(tc: Timecode, frames: number, rate: FrameRate): Timecode;
 
+interface InspectNode {
+    kind: string;
+    name?: string;
+    start: number;
+    end: number;
+    duration: number;
+    totalDuration: number;
+    repeat: number;
+    direction: string;
+    startTimecode?: string;
+    children: InspectNode[];
+    markers: readonly Marker[];
+    cues: readonly {
+        name: string;
+        time: number;
+    }[];
+}
 interface TimelineOptions {
     name?: string;
     repeat?: number;
@@ -198,6 +215,8 @@ declare class Timeline implements TimelineItem {
     }>;
     /** Walks up to the outermost timeline and returns its private transport, if it has been played. */
     get rootTransport(): Transport | undefined;
+    /** Called by a `Transport`'s constructor when it adopts this timeline as its `root` (including its own default root). Not usually called directly. */
+    bindTransport(transport: Transport): void;
     label(name: string, at?: TimelinePosition): this;
     add(item: TimelineItem, at?: TimelinePosition): this;
     /** @deprecated kept for the pre-0.4 API; identical to `add`. */
@@ -220,6 +239,22 @@ declare class Timeline implements TimelineItem {
     seekToMarker(name: string): this;
     nextMarker(fromMs?: number): Marker | undefined;
     previousMarker(fromMs?: number): Marker | undefined;
+    inspect(): InspectNode;
+    private inspectAsChild;
+    /** A stable, human-readable rendering of the tree, its markers, and its cues. */
+    toAscii(options?: {
+        width?: number;
+        frameRate?: FrameRateInput;
+        labels?: boolean;
+    }): string;
+    /** How a position string resolved: its absolute time, and (for a label/anchor form) the base it was measured from. */
+    explain(position: TimelinePosition): {
+        ms: number;
+        frame: number;
+        timecode: string;
+        base?: string;
+        offset?: number;
+    };
     private nestedError;
     private get transport();
     get state(): TransportState;
@@ -241,6 +276,26 @@ declare class Timeline implements TimelineItem {
     private fireSegment;
     private resolvePosition;
 }
+
+interface TraceEntry {
+    tick: number;
+    time: number;
+    frame: number;
+    rate: number;
+    state: TransportState;
+    cues: string[];
+    /** Wall-clock milliseconds since the previous tick's `onTick` (a cheap proxy for actual frame cadence). */
+    durationMs: number;
+}
+interface Trace extends TransportOutput {
+    entries: TraceEntry[];
+    clear(): void;
+    toText(): string;
+}
+/** A ring-buffer `TransportOutput` that records every tick for inspection. Attach via `transport.trace()`. */
+declare function createTrace(options?: {
+    capacity?: number;
+}): Trace;
 
 /** A source of "now", in milliseconds. Swap it to make something other than the scheduler's driver the master clock (e.g. an `AudioContext`). */
 interface Clock {
@@ -273,6 +328,8 @@ interface FrameInfo {
     rate: number;
     direction: 1 | -1;
     frameRate: FrameRate;
+    /** Names of every cue that fired earlier in this same tick (populated as they fire; a handler sees only cues that fired before it). */
+    cues?: string[];
 }
 interface TransportOutput {
     name?: string;
@@ -307,6 +364,7 @@ declare class Transport {
     private explicitDuration?;
     private removeFrame?;
     private outputs;
+    private pendingCueNames;
     private listeners;
     private loopListeners;
     private resolveFinished;
@@ -324,6 +382,10 @@ declare class Transport {
     subscribe(listener: (info: FrameInfo, transport: Transport) => void): () => void;
     /** Notified once per lap when a loop region wraps. */
     onLoop(listener: () => void): () => void;
+    /** Attach a ring-buffer trace output that records every tick (and the cues that fired during it). */
+    trace(options?: {
+        capacity?: number;
+    }): Trace;
     play(): this;
     pause(): this;
     stop(): this;
@@ -349,6 +411,8 @@ declare class Transport {
     private advance;
     private advanceTo;
     private renderAt;
+    /** Records that a cue fired during the current tick (called by `Timeline`). Not usually called directly. */
+    noteCue(name: string): void;
     private frameSnap;
     private emitSeek;
     private emitStateChange;
@@ -441,6 +505,7 @@ declare class Line {
 declare class Tween<T extends MotionValueShape = number> implements TimelineItem {
     static Line: typeof Line;
     readonly kind: "tween";
+    name?: string;
     duration: number;
     delay: number;
     repeat: number;
@@ -506,4 +571,4 @@ declare function stagger(interval?: number, { start }?: {
     start?: number | undefined;
 }): (index: number) => number;
 
-export { parseTimecode as $, type TransportOptions as A, type TransportOutput as B, type Clock as C, type Direction as D, type EasingFunction as E, type FrameDriver as F, type TransportState as G, type TweenOptions as H, type TweenState as I, activeDuration as J, addFrames as K, Line as L, MotionValue as M, defaultRenderContext as N, formatTime as O, type PropertyRange as P, formatTimecode as Q, type RenderContext as R, frameRate as S, Tween as T, frameToMs as U, framesToTimecode as V, interpolate as W, mix as X, msToFrame as Y, msToTimecode as Z, parseTime as _, Timeline as a, resolveEasing as a0, sampleCycle as a1, scheduler as a2, snapToFrame as a3, timecodeToFrames as a4, timecodeToMs as a5, totalDuration as a6, Transport as b, animate as c, cubicBezier as d, spring as e, type CueEvent as f, type CueOptions as g, type CycleSample as h, type CycleSpec as i, Easing as j, type EasingName as k, type FrameInfo as l, type FrameRate as m, type FrameRateInput as n, FrameRates as o, FrameScheduler as p, type FrameTask as q, type Marker as r, stagger as s, type MotionPrimitive as t, type MotionValueShape as u, type TimeInput as v, type Timecode as w, type TimelineItem as x, type TimelineOptions as y, type TimelinePosition as z };
+export { mix as $, type TimelinePosition as A, type Trace as B, type Clock as C, type Direction as D, type EasingFunction as E, type FrameRateInput as F, type TraceEntry as G, type TransportOptions as H, type InspectNode as I, type TransportState as J, type TweenOptions as K, Line as L, MotionValue as M, type TweenState as N, activeDuration as O, type PropertyRange as P, addFrames as Q, type RenderContext as R, createTrace as S, Transport as T, defaultRenderContext as U, formatTime as V, formatTimecode as W, frameRate as X, frameToMs as Y, framesToTimecode as Z, interpolate as _, type TransportOutput as a, msToFrame as a0, msToTimecode as a1, parseTime as a2, parseTimecode as a3, resolveEasing as a4, sampleCycle as a5, scheduler as a6, snapToFrame as a7, timecodeToFrames as a8, timecodeToMs as a9, totalDuration as aa, type TimeInput as b, Timeline as c, type FrameInfo as d, Tween as e, animate as f, cubicBezier as g, spring as h, type CueEvent as i, type CueOptions as j, type CycleSample as k, type CycleSpec as l, Easing as m, type EasingName as n, type FrameDriver as o, type FrameRate as p, FrameRates as q, FrameScheduler as r, stagger as s, type FrameTask as t, type Marker as u, type MotionPrimitive as v, type MotionValueShape as w, type Timecode as x, type TimelineItem as y, type TimelineOptions as z };

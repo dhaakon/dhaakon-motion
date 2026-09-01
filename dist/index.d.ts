@@ -1,5 +1,43 @@
-import { T as Tween, a as Timeline, b as Transport, L as Line, M as MotionValue, c as animate, s as stagger, E as EasingFunction, d as cubicBezier, e as spring } from './core-D60sAinY.js';
-export { C as Clock, f as CueEvent, g as CueOptions, h as CycleSample, i as CycleSpec, D as Direction, j as Easing, k as EasingName, F as FrameDriver, l as FrameInfo, m as FrameRate, n as FrameRateInput, o as FrameRates, p as FrameScheduler, q as FrameTask, r as Marker, t as MotionPrimitive, u as MotionValueShape, P as PropertyRange, R as RenderContext, v as TimeInput, w as Timecode, x as TimelineItem, y as TimelineOptions, z as TimelinePosition, A as TransportOptions, B as TransportOutput, G as TransportState, H as TweenOptions, I as TweenState, J as activeDuration, K as addFrames, N as defaultRenderContext, O as formatTime, Q as formatTimecode, S as frameRate, U as frameToMs, V as framesToTimecode, W as interpolate, X as mix, Y as msToFrame, Z as msToTimecode, _ as parseTime, $ as parseTimecode, a0 as resolveEasing, a1 as sampleCycle, a2 as scheduler, a3 as snapToFrame, a4 as timecodeToFrames, a5 as timecodeToMs, a6 as totalDuration } from './core-D60sAinY.js';
+import { T as Transport, a as TransportOutput, F as FrameRateInput, b as TimeInput, c as Timeline, d as FrameInfo, e as Tween, L as Line, M as MotionValue, f as animate, s as stagger, E as EasingFunction, g as cubicBezier, h as spring } from './core-BQhuD_zO.js';
+export { C as Clock, i as CueEvent, j as CueOptions, k as CycleSample, l as CycleSpec, D as Direction, m as Easing, n as EasingName, o as FrameDriver, p as FrameRate, q as FrameRates, r as FrameScheduler, t as FrameTask, I as InspectNode, u as Marker, v as MotionPrimitive, w as MotionValueShape, P as PropertyRange, R as RenderContext, x as Timecode, y as TimelineItem, z as TimelineOptions, A as TimelinePosition, B as Trace, G as TraceEntry, H as TransportOptions, J as TransportState, K as TweenOptions, N as TweenState, O as activeDuration, Q as addFrames, S as createTrace, U as defaultRenderContext, V as formatTime, W as formatTimecode, X as frameRate, Y as frameToMs, Z as framesToTimecode, _ as interpolate, $ as mix, a0 as msToFrame, a1 as msToTimecode, a2 as parseTime, a3 as parseTimecode, a4 as resolveEasing, a5 as sampleCycle, a6 as scheduler, a7 as snapToFrame, a8 as timecodeToFrames, a9 as timecodeToMs, aa as totalDuration } from './core-BQhuD_zO.js';
+
+/**
+ * A `Transport` meant for offline export rather than real-time playback: it
+ * is never `play()`ed, never touches the scheduler or `performance.now`, and
+ * `attach()` skips (with one warning) any output whose `supportsOffline` is
+ * `false` — e.g. live audio, which has nothing meaningful to do offline.
+ */
+declare class OfflineTransport extends Transport {
+    attach(output: TransportOutput): () => void;
+}
+interface RenderFramesOptions {
+    frameRate?: FrameRateInput;
+    from?: TimeInput;
+    to?: TimeInput;
+    outputs?: TransportOutput[];
+    signal?: AbortSignal;
+    /** Frames between forced `await` yields to the event loop (default 0 = never yield beyond what `onFrame` itself awaits). */
+    yieldEvery?: number;
+}
+/**
+ * Render every frame in `[from, to]` (default the whole duration) at an exact,
+ * accumulation-free frame clock, calling `onFrame` once per frame after every
+ * value has been written and every attached output has drawn. Deterministic:
+ * running it twice, or resuming it on the same transport from where a prior
+ * call left off, produces identical output. Resuming is detected by `from > 0`,
+ * which skips the reset-and-clear-cue-state a fresh run performs at `from <= 0`.
+ */
+declare function renderFrames(source: Transport | Timeline, onFrame: (info: FrameInfo) => void | Promise<void>, options?: RenderFramesOptions): Promise<{
+    frames: number;
+    from: number;
+    to: number;
+}>;
+/** A synchronous, pull-based equivalent of `renderFrames`: each `next()` renders and returns the next frame. */
+declare function frames(source: Transport | Timeline, options?: {
+    frameRate?: FrameRateInput;
+    from?: TimeInput;
+    to?: TimeInput;
+}): Generator<FrameInfo, void, unknown>;
 
 declare const _default: {
     Tween: typeof Tween;
@@ -27,4 +65,4 @@ declare const _default: {
     spring: typeof spring;
 };
 
-export { EasingFunction, Line, MotionValue, Timeline, Transport, Tween, animate, cubicBezier, _default as default, spring, stagger };
+export { EasingFunction, FrameInfo, FrameRateInput, Line, MotionValue, OfflineTransport, type RenderFramesOptions, TimeInput, Timeline, Transport, TransportOutput, Tween, animate, cubicBezier, _default as default, frames, renderFrames, spring, stagger };

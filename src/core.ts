@@ -30,6 +30,7 @@ export class Line {
 export class Tween<T extends MotionValueShape = number> implements TimelineItem {
   static Line = Line;
   readonly kind = 'tween' as const;
+  name?: string;
   duration = 300; delay = 0; repeat = 0; repeatDelay = 0; direction: Direction = 'normal';
   state: TweenState = 'idle'; isAnimating = false; isPaused = false; isReversed = false;
   node: HTMLElement | null = null; properties?: Record<string, PropertyRange>;

@@ -3,6 +3,7 @@ import { frameRate, frameToMs, msToFrame, parseTime, type FrameRate, type FrameR
 import { formatTimecode, msToTimecode } from './timecode';
 import { Timeline, type TimelinePosition } from './timeline';
 import type { TimelineItem } from './items';
+import { createTrace, type Trace } from './trace';
 
 /** A source of "now", in milliseconds. Swap it to make something other than the scheduler's driver the master clock (e.g. an `AudioContext`). */
 export interface Clock { now(): number; }
@@ -36,6 +37,8 @@ export interface FrameInfo {
   rate: number;
   direction: 1 | -1;
   frameRate: FrameRate;
+  /** Names of every cue that fired earlier in this same tick (populated as they fire; a handler sees only cues that fired before it). */
+  cues?: string[];
 }
 
 export interface TransportOutput {
@@ -73,6 +76,7 @@ export class Transport {
   private explicitDuration?: number;
   private removeFrame?: () => void;
   private outputs = new Set<TransportOutput>();
+  private pendingCueNames: string[] | null = null;
   private listeners = new Set<(info: FrameInfo, transport: Transport) => void>();
   private loopListeners = new Set<() => void>();
   private resolveFinished!: (transport: this) => void;
@@ -85,6 +89,7 @@ export class Transport {
     this._rate = options.rate ?? 1;
     this.snap = options.snap ?? false;
     this.root = options.root ?? new Timeline({ scheduler: options.scheduler });
+    this.root.bindTransport(this);
     if (options.duration != null) this.explicitDuration = parseTime(options.duration, this.frameRate);
     this.finished = this.newFinished();
     if (options.loop) this.setLoop(options.loop);
@@ -115,6 +120,13 @@ export class Transport {
   onLoop(listener: () => void): () => void {
     this.loopListeners.add(listener);
     return () => { this.loopListeners.delete(listener); };
+  }
+
+  /** Attach a ring-buffer trace output that records every tick (and the cues that fired during it). */
+  trace(options: { capacity?: number } = {}): Trace {
+    const trace = createTrace(options);
+    this.attach(trace);
+    return trace;
   }
 
   play(): this {
@@ -268,13 +280,18 @@ export class Transport {
       timecode: formatTimecode(msToTimecode(quantized, this.frameRate)),
       delta, rate: this._rate, direction, frameRate: this.frameRate,
     };
+    this.pendingCueNames = null;
     this.root.sampleAt(quantized, { direction, fireCues, frame: info, transport: this });
+    if (this.pendingCueNames) info.cues = this.pendingCueNames;
     for (const output of this.outputs) {
       try { output.onTick?.(info); } catch (err) { this.onError(err); }
     }
     for (const listener of this.listeners) listener(info, this);
     this.lastRenderedTime = quantized;
   }
+
+  /** Records that a cue fired during the current tick (called by `Timeline`). Not usually called directly. */
+  noteCue(name: string) { (this.pendingCueNames ??= []).push(name); }
 
   private frameSnap(ms: number): number {
     return frameToMs(msToFrame(ms, this.frameRate), this.frameRate);
