@@ -1,5 +1,6 @@
 import React from 'react';
-import { MotionValueShape, TweenOptions, Tween, EasingFunction, EasingName, MotionValue, Timeline } from '@dhaakon/motion';
+import { MotionValueShape, TweenOptions, Tween, EasingFunction, EasingName, MotionStyle, MotionValue, Timeline } from '@dhaakon/motion';
+export { MotionStyle } from '@dhaakon/motion';
 
 interface MotionTransition {
     duration?: number;
@@ -38,7 +39,6 @@ interface MotionRenderProps<T extends MotionValueShape> extends Omit<TweenOption
     children: (value: T, controls: React.RefObject<Tween<T> | null>) => React.ReactNode;
 }
 declare function Motion<T extends MotionValueShape>({ from, to, children, ...options }: MotionRenderProps<T>): React.JSX.Element;
-type MotionStyle = Record<string, number | string>;
 type NativeProps<T extends React.ElementType> = Omit<React.ComponentPropsWithoutRef<T>, 'style'>;
 type MotionElementProps<T extends React.ElementType> = NativeProps<T> & {
     initial?: MotionStyle | false;
@@ -70,4 +70,4 @@ interface RevealProps extends Omit<MotionElementProps<'div'>, 'initial' | 'anima
 }
 declare function Reveal({ from, to, once, amount, margin, ...props }: RevealProps): React.JSX.Element;
 
-export { type InViewOptions, Motion, MotionConfig, type MotionConfigValue, type MotionElementProps, type MotionRenderProps, type MotionStyle, type MotionTransition, Reveal, type RevealProps, createMotionComponent, motion, useInView, useMotionValue, useMotionValueState, useReducedMotion, useTimeline, useTween };
+export { type InViewOptions, Motion, MotionConfig, type MotionConfigValue, type MotionElementProps, type MotionRenderProps, type MotionTransition, Reveal, type RevealProps, createMotionComponent, motion, useInView, useMotionValue, useMotionValueState, useReducedMotion, useTimeline, useTween };

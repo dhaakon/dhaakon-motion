@@ -1,10 +1,28 @@
+type MotionPrimitive = number | string;
+type MotionValueShape = MotionPrimitive | MotionPrimitive[] | {
+    [key: string]: MotionValueShape | undefined;
+};
+declare const mix: (from: number, to: number, progress: number) => number;
+declare function interpolate<T extends MotionValueShape>(from: T, to: T, progress: number): T;
+
 type EasingFunction = (progress: number) => number;
+/** How an easing function was built, so `serializeEasing` can recover a JSON-safe description of it. */
+type EasingTuple = ['cubicBezier', number, number, number, number] | ['spring', {
+    stiffness?: number;
+    damping?: number;
+    mass?: number;
+}] | ['steps', number];
+/** Anything that can describe an easing curve: a built-in or registered name, a tuple that builds one, or a function directly. */
+type EasingInput = EasingFunction | EasingTuple | string;
 declare function cubicBezier(x1: number, y1: number, x2: number, y2: number): EasingFunction;
-declare function spring({ stiffness, damping, mass }?: {
-    stiffness?: number | undefined;
-    damping?: number | undefined;
-    mass?: number | undefined;
-}): EasingFunction;
+interface SpringOptions {
+    stiffness?: number;
+    damping?: number;
+    mass?: number;
+}
+declare function spring(options?: SpringOptions): EasingFunction;
+/** A stepped ("hold") easing: `count` discrete plateaus across the curve. */
+declare function steps(count: number, position?: 'start' | 'end'): EasingFunction;
 declare const Easing: {
     linear: (t: number) => number;
     easeInQuad: (t: number) => number;
@@ -20,63 +38,17 @@ declare const Easing: {
     dhaakon: EasingFunction;
 };
 type EasingName = keyof typeof Easing;
-declare function resolveEasing(easing?: EasingFunction | EasingName): EasingFunction;
-
-type MotionPrimitive = number | string;
-type MotionValueShape = MotionPrimitive | MotionPrimitive[] | {
-    [key: string]: MotionValueShape;
-};
-declare const mix: (from: number, to: number, progress: number) => number;
-declare function interpolate<T extends MotionValueShape>(from: T, to: T, progress: number): T;
-
-type FrameTask = (time: number) => boolean | void;
-interface FrameDriver {
-    request(callback: (time: number) => void): unknown;
-    cancel(id: unknown): void;
-    now(): number;
-}
-declare class FrameScheduler {
-    private driver;
-    private tasks;
-    private frame;
-    constructor(driver?: FrameDriver);
-    get size(): number;
-    now(): number;
-    add(task: FrameTask): () => void;
-    delete(task: FrameTask): void;
-    flush(time?: number): void;
-    clear(): void;
-    /** Swap the underlying time/frame source (used by tests). Cancels any pending frame and re-wakes on the new driver if tasks are active. */
-    setDriver(driver: FrameDriver): void;
-    private wake;
-    private tick;
-}
-declare const scheduler: FrameScheduler;
-
-type Direction = 'normal' | 'reverse' | 'alternate' | 'alternate-reverse';
-interface CycleSpec {
-    duration: number;
-    delay: number;
-    repeat: number;
-    repeatDelay: number;
-    direction: Direction;
-    reversed: boolean;
-}
-interface CycleSample {
-    iteration: number;
-    cycleTime: number;
-    progress: number;
-    active: number;
-}
-/** Total time a cycle spends actively running, excluding its leading delay. `Infinity` when `repeat` is `Infinity`. */
-declare function activeDuration(spec: Pick<CycleSpec, 'duration' | 'repeat' | 'repeatDelay'>): number;
-/** Total time a cycle occupies, including its leading delay. */
-declare function totalDuration(spec: Pick<CycleSpec, 'duration' | 'delay' | 'repeat' | 'repeatDelay'>): number;
+/** Register a custom easing under a name, so it can be used as a string (e.g. in a cue sheet) and round-trip through `serializeEasing`. */
+declare function registerEasing(name: string, fn: EasingFunction): EasingFunction;
+/** Resolve any `EasingInput` — a built-in or registered name, a `['cubicBezier', ...]`/`['spring', ...]`/`['steps', n]` tuple, or a function — into a function. */
+declare function resolveEasing(easing?: EasingFunction | EasingName | EasingInput): EasingFunction;
 /**
- * Pure repeat/yoyo/direction sampler shared by `Tween` and offline rendering.
- * Extracted from the original `Tween.sampleAt` math; must stay bit-for-bit identical.
+ * The inverse of `resolveEasing`: recover a JSON-safe description of an
+ * easing function — its registered/built-in name if it has one, else the
+ * tuple it was built from (`cubicBezier`/`spring`/`steps` all tag their
+ * result), else `undefined` for an anonymous function.
  */
-declare function sampleCycle(spec: CycleSpec, milliseconds: number): CycleSample;
+declare function serializeEasing(input: EasingInput | undefined): EasingInput | undefined;
 
 /** A rational frame rate: `num / den` frames per second, with an optional SMPTE drop-frame flag. */
 interface FrameRate {
@@ -123,6 +95,55 @@ declare function parseTime(input: TimeInput, rate?: FrameRateInput): number;
 /** Format milliseconds for display. `'frames'` and `'timecode'` styles require `rate`. */
 declare function formatTime(ms: number, rate?: FrameRateInput, style?: 'ms' | 'seconds' | 'frames' | 'timecode'): string;
 
+type Direction = 'normal' | 'reverse' | 'alternate' | 'alternate-reverse';
+interface CycleSpec {
+    duration: number;
+    delay: number;
+    repeat: number;
+    repeatDelay: number;
+    direction: Direction;
+    reversed: boolean;
+}
+interface CycleSample {
+    iteration: number;
+    cycleTime: number;
+    progress: number;
+    active: number;
+}
+/** Total time a cycle spends actively running, excluding its leading delay. `Infinity` when `repeat` is `Infinity`. */
+declare function activeDuration(spec: Pick<CycleSpec, 'duration' | 'repeat' | 'repeatDelay'>): number;
+/** Total time a cycle occupies, including its leading delay. */
+declare function totalDuration(spec: Pick<CycleSpec, 'duration' | 'delay' | 'repeat' | 'repeatDelay'>): number;
+/**
+ * Pure repeat/yoyo/direction sampler shared by `Tween` and offline rendering.
+ * Extracted from the original `Tween.sampleAt` math; must stay bit-for-bit identical.
+ */
+declare function sampleCycle(spec: CycleSpec, milliseconds: number): CycleSample;
+
+type FrameTask = (time: number) => boolean | void;
+interface FrameDriver {
+    request(callback: (time: number) => void): unknown;
+    cancel(id: unknown): void;
+    now(): number;
+}
+declare class FrameScheduler {
+    private driver;
+    private tasks;
+    private frame;
+    constructor(driver?: FrameDriver);
+    get size(): number;
+    now(): number;
+    add(task: FrameTask): () => void;
+    delete(task: FrameTask): void;
+    flush(time?: number): void;
+    clear(): void;
+    /** Swap the underlying time/frame source (used by tests). Cancels any pending frame and re-wakes on the new driver if tasks are active. */
+    setDriver(driver: FrameDriver): void;
+    private wake;
+    private tick;
+}
+declare const scheduler: FrameScheduler;
+
 interface Timecode {
     hours: number;
     minutes: number;
@@ -144,6 +165,113 @@ declare function msToTimecode(ms: number, rate: FrameRate): Timecode;
 declare function timecodeToMs(input: string | Timecode, rate: FrameRate): number;
 /** Add (or subtract, with a negative count) a number of frames to a timecode. */
 declare function addFrames(tc: Timecode, frames: number, rate: FrameRate): Timecode;
+
+type TweenState = 'idle' | 'delayed' | 'running' | 'paused' | 'finished' | 'cancelled';
+interface PropertyRange {
+    start: number;
+    end: number;
+    unit?: string;
+}
+interface TweenOptions<T extends MotionValueShape = number> {
+    from?: T;
+    to?: T;
+    curve?: [T, T] | Line;
+    properties?: Record<string, PropertyRange>;
+    node?: HTMLElement | null;
+    duration?: number;
+    delay?: number;
+    repeat?: number;
+    repeatDelay?: number;
+    yoyo?: boolean;
+    direction?: Direction;
+    easing?: EasingInput | EasingName;
+    ease?: EasingInput | EasingName;
+    autoplay?: boolean;
+    onBegin?: (tween: Tween<T>) => void;
+    onStart?: (tween: Tween<T>) => void;
+    onUpdate?: (value: T, progress: number, tween: Tween<T>) => void;
+    onEnd?: (tween: Tween<T>) => void;
+    onComplete?: (tween: Tween<T>) => void;
+    scheduler?: FrameScheduler;
+}
+declare class Line {
+    readonly curves: [number[], number[]];
+    constructor(start: number[], end: number[]);
+    value(progress: number): number[];
+}
+declare class Tween<T extends MotionValueShape = number> implements TimelineItem {
+    static Line: typeof Line;
+    readonly kind: "tween";
+    name?: string;
+    duration: number;
+    delay: number;
+    repeat: number;
+    repeatDelay: number;
+    direction: Direction;
+    state: TweenState;
+    isAnimating: boolean;
+    isPaused: boolean;
+    isReversed: boolean;
+    node: HTMLElement | null;
+    properties?: Record<string, PropertyRange>;
+    from: T;
+    toValue: T;
+    easing: EasingFunction;
+    onBegin?: TweenOptions<T>['onBegin'];
+    onStart?: TweenOptions<T>['onStart'];
+    onUpdate?: TweenOptions<T>['onUpdate'];
+    onEnd?: TweenOptions<T>['onEnd'];
+    onComplete?: TweenOptions<T>['onComplete'];
+    value: T;
+    progress: number;
+    elapsed: number;
+    private frameLoop;
+    private startedAt;
+    private removeFrame?;
+    private resolveFinished;
+    finished: Promise<this>;
+    constructor(options?: TweenOptions<T>);
+    configure(options: TweenOptions<T>): this;
+    to(options: TweenOptions<T>): this;
+    play(options?: TweenOptions<T>): this;
+    pause(): this;
+    stop(): this;
+    cancel(): this;
+    reverse(): this;
+    seek(progress: number): this;
+    seekTime(milliseconds: number): this;
+    setDuration(duration: number): this;
+    /** The frame index the tween's active time falls in, at `rate` (default 60 fps). Floor-based: matches which frame is on screen. */
+    frameAt(rate?: FrameRateInput): number;
+    /** The SMPTE timecode for the tween's active time, at `rate`. */
+    timecodeAt(rate: FrameRateInput): Timecode;
+    getCurrentFrame(fps?: number): number;
+    /**
+     * A two-keyframe `Track` equivalent to this tween's `from`/`to`/`duration`/`easing`/`repeat`/`repeatDelay`/`direction`.
+     * Its `apply` forwards sampled values to this tween's own `onUpdate` (progress is not recomputed — read `value` from the callback).
+     */
+    toTrack(): Track<T>;
+    get activeDuration(): number;
+    get totalDuration(): number;
+    sampleAt(milliseconds: number, _ctx?: RenderContext): T;
+    private advance;
+    private newFinishedPromise;
+}
+declare class MotionValue<T extends MotionValueShape> {
+    private current;
+    private listeners;
+    private animation?;
+    constructor(current: T);
+    get(): T;
+    set(value: T): void;
+    subscribe: (listener: () => void) => () => void;
+    animate(to: T, options?: Omit<TweenOptions<T>, 'from' | 'to' | 'onUpdate'>): Tween<T>;
+    stop(): void;
+}
+declare function animate<T extends MotionValueShape>(from: T, to: T, options?: Omit<TweenOptions<T>, 'from' | 'to'>): Tween<T>;
+declare function stagger(interval?: number, { start }?: {
+    start?: number | undefined;
+}): (index: number) => number;
 
 interface InspectNode {
     kind: string;
@@ -328,8 +456,8 @@ interface FrameInfo {
     rate: number;
     direction: 1 | -1;
     frameRate: FrameRate;
-    /** Names of every cue that fired earlier in this same tick (populated as they fire; a handler sees only cues that fired before it). */
-    cues?: string[];
+    /** Every cue that fired earlier in this same tick (populated as they fire; a handler sees only cues that fired before it). */
+    cues?: CueEvent[];
 }
 interface TransportOutput {
     name?: string;
@@ -364,7 +492,7 @@ declare class Transport {
     private explicitDuration?;
     private removeFrame?;
     private outputs;
-    private pendingCueNames;
+    private pendingCues;
     private listeners;
     private loopListeners;
     private resolveFinished;
@@ -412,7 +540,7 @@ declare class Transport {
     private advanceTo;
     private renderAt;
     /** Records that a cue fired during the current tick (called by `Timeline`). Not usually called directly. */
-    noteCue(name: string): void;
+    noteCue(event: CueEvent): void;
     private frameSnap;
     private emitSeek;
     private emitStateChange;
@@ -469,106 +597,49 @@ interface CueOptions {
     onExit?(e: CueEvent): void;
 }
 
-type TweenState = 'idle' | 'delayed' | 'running' | 'paused' | 'finished' | 'cancelled';
-interface PropertyRange {
-    start: number;
-    end: number;
-    unit?: string;
+/** One value at a point in time. `easing` describes the segment *ending* at this key (ignored on the first key). */
+interface Keyframe<T> {
+    at: TimeInput;
+    value: T;
+    easing?: EasingInput;
 }
-interface TweenOptions<T extends MotionValueShape = number> {
-    from?: T;
-    to?: T;
-    curve?: [T, T] | Line;
-    properties?: Record<string, PropertyRange>;
-    node?: HTMLElement | null;
-    duration?: number;
-    delay?: number;
+interface TrackOptions<T extends MotionValueShape> {
+    keyframes: Keyframe<T>[];
+    /** How a sampled value is written. Required unless `target` is given. */
+    apply?: (value: T, ctx?: RenderContext) => void;
+    /** Convenience for `apply: (v) => target.set(v)`. */
+    target?: MotionValue<T>;
+    name?: string;
+    /** Resolves frame/timecode `at` values. */
+    frameRate?: FrameRateInput;
     repeat?: number;
     repeatDelay?: number;
-    yoyo?: boolean;
     direction?: Direction;
-    easing?: EasingFunction | EasingName;
-    ease?: EasingFunction | EasingName;
-    autoplay?: boolean;
-    onBegin?: (tween: Tween<T>) => void;
-    onStart?: (tween: Tween<T>) => void;
-    onUpdate?: (value: T, progress: number, tween: Tween<T>) => void;
-    onEnd?: (tween: Tween<T>) => void;
-    onComplete?: (tween: Tween<T>) => void;
-    scheduler?: FrameScheduler;
+    /** Default easing for every segment that doesn't specify its own. */
+    easing?: EasingInput;
 }
-declare class Line {
-    readonly curves: [number[], number[]];
-    constructor(start: number[], end: number[]);
-    value(progress: number): number[];
-}
-declare class Tween<T extends MotionValueShape = number> implements TimelineItem {
-    static Line: typeof Line;
-    readonly kind: "tween";
+/** A multi-keyframe animation track — the N-keyframe generalization of a two-key `Tween`. */
+declare class Track<T extends MotionValueShape> implements TimelineItem {
+    readonly kind: "track";
     name?: string;
-    duration: number;
-    delay: number;
-    repeat: number;
-    repeatDelay: number;
-    direction: Direction;
-    state: TweenState;
-    isAnimating: boolean;
-    isPaused: boolean;
-    isReversed: boolean;
-    node: HTMLElement | null;
-    properties?: Record<string, PropertyRange>;
-    from: T;
-    toValue: T;
-    easing: EasingFunction;
-    onBegin?: TweenOptions<T>['onBegin'];
-    onStart?: TweenOptions<T>['onStart'];
-    onUpdate?: TweenOptions<T>['onUpdate'];
-    onEnd?: TweenOptions<T>['onEnd'];
-    onComplete?: TweenOptions<T>['onComplete'];
-    value: T;
-    progress: number;
-    elapsed: number;
-    private frameLoop;
-    private startedAt;
-    private removeFrame?;
-    private resolveFinished;
-    finished: Promise<this>;
-    constructor(options?: TweenOptions<T>);
-    configure(options: TweenOptions<T>): this;
-    to(options: TweenOptions<T>): this;
-    play(options?: TweenOptions<T>): this;
-    pause(): this;
-    stop(): this;
-    cancel(): this;
-    reverse(): this;
-    seek(progress: number): this;
-    seekTime(milliseconds: number): this;
-    setDuration(duration: number): this;
-    /** The frame index the tween's active time falls in, at `rate` (default 60 fps). Floor-based: matches which frame is on screen. */
-    frameAt(rate?: FrameRateInput): number;
-    /** The SMPTE timecode for the tween's active time, at `rate`. */
-    timecodeAt(rate: FrameRateInput): Timecode;
-    getCurrentFrame(fps?: number): number;
-    get activeDuration(): number;
+    readonly keyframes: ReadonlyArray<{
+        at: number;
+        value: T;
+    }>;
+    private segments;
+    private apply;
+    private repeat;
+    private repeatDelay;
+    private direction;
+    constructor(options: TrackOptions<T>);
+    /** Content length: the last keyframe's time. */
+    get duration(): number;
     get totalDuration(): number;
-    sampleAt(milliseconds: number, _ctx?: RenderContext): T;
-    private advance;
-    private newFinishedPromise;
+    /** Pure: the interpolated value at a content-local time, without writing it anywhere. */
+    valueAt(ms: number): T;
+    sampleAt(localMs: number, ctx?: RenderContext): void;
 }
-declare class MotionValue<T extends MotionValueShape> {
-    private current;
-    private listeners;
-    private animation?;
-    constructor(current: T);
-    get(): T;
-    set(value: T): void;
-    subscribe: (listener: () => void) => () => void;
-    animate(to: T, options?: Omit<TweenOptions<T>, 'from' | 'to' | 'onUpdate'>): Tween<T>;
-    stop(): void;
-}
-declare function animate<T extends MotionValueShape>(from: T, to: T, options?: Omit<TweenOptions<T>, 'from' | 'to'>): Tween<T>;
-declare function stagger(interval?: number, { start }?: {
-    start?: number | undefined;
-}): (index: number) => number;
+/** `new Track({ target, keyframes, ...options })`, accepting either a `MotionValue` or a plain setter as the first argument. */
+declare function track<T extends MotionValueShape>(target: MotionValue<T> | ((value: T) => void), keyframes: Keyframe<T>[], options?: Omit<TrackOptions<T>, 'keyframes' | 'apply' | 'target'>): Track<T>;
 
-export { mix as $, type TimelinePosition as A, type Trace as B, type Clock as C, type Direction as D, type EasingFunction as E, type FrameRateInput as F, type TraceEntry as G, type TransportOptions as H, type InspectNode as I, type TransportState as J, type TweenOptions as K, Line as L, MotionValue as M, type TweenState as N, activeDuration as O, type PropertyRange as P, addFrames as Q, type RenderContext as R, createTrace as S, Transport as T, defaultRenderContext as U, formatTime as V, formatTimecode as W, frameRate as X, frameToMs as Y, framesToTimecode as Z, interpolate as _, type TransportOutput as a, msToFrame as a0, msToTimecode as a1, parseTime as a2, parseTimecode as a3, resolveEasing as a4, sampleCycle as a5, scheduler as a6, snapToFrame as a7, timecodeToFrames as a8, timecodeToMs as a9, totalDuration as aa, type TimeInput as b, Timeline as c, type FrameInfo as d, Tween as e, animate as f, cubicBezier as g, spring as h, type CueEvent as i, type CueOptions as j, type CycleSample as k, type CycleSpec as l, Easing as m, type EasingName as n, type FrameDriver as o, type FrameRate as p, FrameRates as q, FrameScheduler as r, stagger as s, type FrameTask as t, type Marker as u, type MotionPrimitive as v, type MotionValueShape as w, type Timecode as x, type TimelineItem as y, type TimelineOptions as z };
+export { formatTime as $, type MotionPrimitive as A, type MotionValueShape as B, type Clock as C, type Direction as D, type EasingFunction as E, type FrameRateInput as F, type Timecode as G, type TimelineOptions as H, type InspectNode as I, type TimelinePosition as J, type Keyframe as K, Line as L, MotionValue as M, type Trace as N, type TraceEntry as O, type PropertyRange as P, type TransportOptions as Q, type RenderContext as R, type SpringOptions as S, type TimelineItem as T, type TransportState as U, type TweenOptions as V, type TweenState as W, activeDuration as X, addFrames as Y, createTrace as Z, defaultRenderContext as _, type TransportOutput as a, formatTimecode as a0, frameRate as a1, frameToMs as a2, framesToTimecode as a3, interpolate as a4, mix as a5, msToFrame as a6, msToTimecode as a7, parseTime as a8, parseTimecode as a9, registerEasing as aa, resolveEasing as ab, sampleCycle as ac, scheduler as ad, serializeEasing as ae, snapToFrame as af, steps as ag, timecodeToFrames as ah, timecodeToMs as ai, totalDuration as aj, track as ak, type TrackOptions as b, Track as c, Transport as d, Timeline as e, type TimeInput as f, type FrameInfo as g, type CueEvent as h, Tween as i, animate as j, cubicBezier as k, spring as l, type CueOptions as m, type CycleSample as n, type CycleSpec as o, Easing as p, type EasingInput as q, type EasingName as r, stagger as s, type EasingTuple as t, type FrameDriver as u, type FrameRate as v, FrameRates as w, FrameScheduler as x, type FrameTask as y, type Marker as z };

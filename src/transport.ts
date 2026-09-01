@@ -2,7 +2,7 @@ import { scheduler, type FrameScheduler, type FrameTask } from './scheduler';
 import { frameRate, frameToMs, msToFrame, parseTime, type FrameRate, type FrameRateInput, type TimeInput } from './time';
 import { formatTimecode, msToTimecode } from './timecode';
 import { Timeline, type TimelinePosition } from './timeline';
-import type { TimelineItem } from './items';
+import type { CueEvent, TimelineItem } from './items';
 import { createTrace, type Trace } from './trace';
 
 /** A source of "now", in milliseconds. Swap it to make something other than the scheduler's driver the master clock (e.g. an `AudioContext`). */
@@ -37,8 +37,8 @@ export interface FrameInfo {
   rate: number;
   direction: 1 | -1;
   frameRate: FrameRate;
-  /** Names of every cue that fired earlier in this same tick (populated as they fire; a handler sees only cues that fired before it). */
-  cues?: string[];
+  /** Every cue that fired earlier in this same tick (populated as they fire; a handler sees only cues that fired before it). */
+  cues?: CueEvent[];
 }
 
 export interface TransportOutput {
@@ -76,7 +76,7 @@ export class Transport {
   private explicitDuration?: number;
   private removeFrame?: () => void;
   private outputs = new Set<TransportOutput>();
-  private pendingCueNames: string[] | null = null;
+  private pendingCues: CueEvent[] | null = null;
   private listeners = new Set<(info: FrameInfo, transport: Transport) => void>();
   private loopListeners = new Set<() => void>();
   private resolveFinished!: (transport: this) => void;
@@ -280,9 +280,9 @@ export class Transport {
       timecode: formatTimecode(msToTimecode(quantized, this.frameRate)),
       delta, rate: this._rate, direction, frameRate: this.frameRate,
     };
-    this.pendingCueNames = null;
+    this.pendingCues = null;
     this.root.sampleAt(quantized, { direction, fireCues, frame: info, transport: this });
-    if (this.pendingCueNames) info.cues = this.pendingCueNames;
+    if (this.pendingCues) info.cues = this.pendingCues;
     for (const output of this.outputs) {
       try { output.onTick?.(info); } catch (err) { this.onError(err); }
     }
@@ -291,7 +291,7 @@ export class Transport {
   }
 
   /** Records that a cue fired during the current tick (called by `Timeline`). Not usually called directly. */
-  noteCue(name: string) { (this.pendingCueNames ??= []).push(name); }
+  noteCue(event: CueEvent) { (this.pendingCues ??= []).push(event); }
 
   private frameSnap(ms: number): number {
     return frameToMs(msToFrame(ms, this.frameRate), this.frameRate);

@@ -23,7 +23,7 @@ test('renderFrames fires a cue exactly once, on the frame that contains it', asy
   const fired: number[] = [];
   timeline.cue('watch', 500, (e) => fired.push(e.time));
   let firedOnFrame = -1;
-  await renderFrames(timeline, (info) => { if (info.cues?.includes('watch')) firedOnFrame = info.frame; }, { frameRate: 24 });
+  await renderFrames(timeline, (info) => { if (info.cues?.some((cue) => cue.name === 'watch')) firedOnFrame = info.frame; }, { frameRate: 24 });
   expect(fired.length).toBe(1);
   expect(firedOnFrame).toBe(12);
 });

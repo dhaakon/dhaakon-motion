@@ -375,7 +375,7 @@ export class Timeline implements TimelineItem {
       if (!handler) continue;
       point.fired = true;
       const event: CueEvent = { name: point.name, time: point.time, direction: forward ? 1 : -1, payload: point.payload, timeline: this, frame: ctx.frame };
-      try { handler(event); this.rootTransport?.noteCue(point.name); } catch (err) { (this.rootTransport?.onError ?? defaultOnError)(err); }
+      try { handler(event); this.rootTransport?.noteCue(event); } catch (err) { (this.rootTransport?.onError ?? defaultOnError)(err); }
     }
   }
 

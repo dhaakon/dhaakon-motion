@@ -59,9 +59,10 @@ var scheduler = new FrameScheduler(globalThisDriver);
 
 // src/easing.ts
 var clamp = (n) => Math.min(1, Math.max(0, n));
+var easingSource = /* @__PURE__ */ new WeakMap();
 function cubicBezier(x1, y1, x2, y2) {
   const sample2 = (a, b, t) => 3 * a * (1 - t) ** 2 * t + 3 * b * (1 - t) * t ** 2 + t ** 3;
-  return (progress) => {
+  const fn = (progress) => {
     const x = clamp(progress);
     let low = 0;
     let high = 1;
@@ -75,6 +76,35 @@ function cubicBezier(x1, y1, x2, y2) {
     }
     return sample2(y1, y2, t);
   };
+  easingSource.set(fn, ["cubicBezier", x1, y1, x2, y2]);
+  return fn;
+}
+function spring(options = {}) {
+  const { stiffness = 170, damping = 26, mass = 1 } = options;
+  const omega = Math.sqrt(stiffness / mass);
+  const ratio = damping / (2 * Math.sqrt(stiffness * mass));
+  const duration = 1;
+  const response = (t) => {
+    if (ratio < 1) {
+      const damped = omega * Math.sqrt(1 - ratio * ratio);
+      return 1 - Math.exp(-ratio * omega * t) * (Math.cos(damped * t) + ratio * omega / damped * Math.sin(damped * t));
+    }
+    return 1 - Math.exp(-omega * t) * (1 + omega * t);
+  };
+  const end = response(duration) || 1;
+  const fn = (t) => response(clamp(t) * duration) / end;
+  easingSource.set(fn, ["spring", options]);
+  return fn;
+}
+function steps(count, position = "end") {
+  const n = Math.max(1, Math.round(count));
+  const fn = (t) => {
+    const x = clamp(t);
+    const step = position === "start" ? Math.ceil(x * n) : Math.floor(x * n);
+    return Math.min(1, Math.max(0, step / n));
+  };
+  easingSource.set(fn, ["steps", n]);
+  return fn;
 }
 var Easing = {
   linear: (t) => t,
@@ -90,9 +120,24 @@ var Easing = {
   easeOutBack: (t) => 1 + 2.70158 * (t - 1) ** 3 + 1.70158 * (t - 1) ** 2,
   dhaakon: cubicBezier(0.16, 1, 0.3, 1)
 };
+var builtinNames = new Map(
+  Object.entries(Easing).map(([name, fn]) => [fn, name])
+);
+var registry = /* @__PURE__ */ new Map();
 function resolveEasing(easing) {
   if (!easing) return Easing.dhaakon;
-  return typeof easing === "string" ? Easing[easing] : easing;
+  if (typeof easing === "function") return easing;
+  if (typeof easing === "string") {
+    if (easing in Easing) return Easing[easing];
+    const registered = registry.get(easing);
+    if (registered) return registered;
+    throw new Error(`Unknown easing: "${easing}"`);
+  }
+  const [kind, ...args] = easing;
+  if (kind === "cubicBezier") return cubicBezier(...args);
+  if (kind === "spring") return spring(args[0]);
+  if (kind === "steps") return steps(args[0]);
+  throw new Error(`Unknown easing tuple: ${JSON.stringify(easing)}`);
 }
 
 // src/interpolate.ts
@@ -327,6 +372,59 @@ function parseTime(input, rate) {
   throw new Error(`parseTime: unrecognized time value "${input}"`);
 }
 
+// src/track.ts
+var Track = class {
+  kind = "track";
+  name;
+  keyframes;
+  segments = [];
+  apply;
+  repeat;
+  repeatDelay;
+  direction;
+  constructor(options) {
+    if (!options.apply && !options.target) throw new Error("Track needs either `apply` or `target`.");
+    this.name = options.name;
+    this.apply = options.apply ?? ((value) => options.target.set(value));
+    this.repeat = options.repeat ?? 0;
+    this.repeatDelay = options.repeatDelay ?? 0;
+    this.direction = options.direction ?? "normal";
+    if (!options.keyframes.length) throw new Error("Track needs at least one keyframe.");
+    const rate = options.frameRate ? frameRate(options.frameRate) : void 0;
+    const resolved = options.keyframes.map((key) => ({ at: typeof key.at === "number" ? key.at : parseTime(key.at, rate), value: key.value, easing: key.easing })).sort((a, b) => a.at - b.at);
+    this.keyframes = resolved.map(({ at, value }) => ({ at, value }));
+    for (let i = 1; i < resolved.length; i += 1) {
+      this.segments.push({ from: resolved[i - 1].at, to: resolved[i].at, ease: resolveEasing(resolved[i].easing ?? options.easing) });
+    }
+  }
+  /** Content length: the last keyframe's time. */
+  get duration() {
+    return this.keyframes.at(-1)?.at ?? 0;
+  }
+  get totalDuration() {
+    return totalDuration({ duration: this.duration, delay: 0, repeat: this.repeat, repeatDelay: this.repeatDelay });
+  }
+  /** Pure: the interpolated value at a content-local time, without writing it anywhere. */
+  valueAt(ms) {
+    const first = this.keyframes[0];
+    const last = this.keyframes.at(-1);
+    if (this.keyframes.length === 1 || ms <= first.at) return first.value;
+    if (ms >= last.at) return last.value;
+    const index = this.segments.findIndex((segment2) => ms <= segment2.to);
+    const segment = this.segments[index === -1 ? this.segments.length - 1 : index];
+    const from = this.keyframes[index];
+    const to = this.keyframes[index + 1];
+    const span = segment.to - segment.from;
+    const t = span <= 0 ? 1 : (ms - segment.from) / span;
+    return interpolate(from.value, to.value, segment.ease(Math.max(0, Math.min(1, t))));
+  }
+  sampleAt(localMs, ctx) {
+    const spec = { duration: this.duration, delay: 0, repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction, reversed: false };
+    const { cycleTime } = sampleCycle(spec, localMs);
+    this.apply(this.valueAt(cycleTime), ctx);
+  }
+};
+
 // src/core.ts
 var Line = class {
   curves;
@@ -479,6 +577,23 @@ var Tween = class {
   getCurrentFrame(fps = 60) {
     return this.frameAt(fps);
   }
+  /**
+   * A two-keyframe `Track` equivalent to this tween's `from`/`to`/`duration`/`easing`/`repeat`/`repeatDelay`/`direction`.
+   * Its `apply` forwards sampled values to this tween's own `onUpdate` (progress is not recomputed — read `value` from the callback).
+   */
+  toTrack() {
+    return new Track({
+      name: this.name,
+      keyframes: [{ at: this.delay, value: this.from }, { at: this.delay + this.duration, value: this.toValue, easing: this.easing }],
+      repeat: this.repeat,
+      repeatDelay: this.repeatDelay,
+      direction: this.direction,
+      apply: (value) => {
+        this.value = value;
+        this.onUpdate?.(value, this.progress, this);
+      }
+    });
+  }
   get activeDuration() {
     return this.repeat === Infinity ? Infinity : this.duration * (this.repeat + 1) + this.repeatDelay * this.repeat;
   }
@@ -538,7 +653,8 @@ function createTrace(options = {}) {
       const now2 = wallNow();
       const durationMs = lastTickAt == null ? 0 : now2 - lastTickAt;
       lastTickAt = now2;
-      trace.entries.push({ tick: tickCount, time: info.time, frame: info.frame, rate: info.rate, state, cues: info.cues ?? [], durationMs });
+      const cues = (info.cues ?? []).map((cue) => cue.name);
+      trace.entries.push({ tick: tickCount, time: info.time, frame: info.frame, rate: info.rate, state, cues, durationMs });
       if (trace.entries.length > capacity) trace.entries.splice(0, trace.entries.length - capacity);
       tickCount += 1;
     },
@@ -577,7 +693,7 @@ var Transport = class {
   explicitDuration;
   removeFrame;
   outputs = /* @__PURE__ */ new Set();
-  pendingCueNames = null;
+  pendingCues = null;
   listeners = /* @__PURE__ */ new Set();
   loopListeners = /* @__PURE__ */ new Set();
   resolveFinished;
@@ -808,9 +924,9 @@ var Transport = class {
       direction,
       frameRate: this.frameRate
     };
-    this.pendingCueNames = null;
+    this.pendingCues = null;
     this.root.sampleAt(quantized, { direction, fireCues, frame: info, transport: this });
-    if (this.pendingCueNames) info.cues = this.pendingCueNames;
+    if (this.pendingCues) info.cues = this.pendingCues;
     for (const output of this.outputs) {
       try {
         output.onTick?.(info);
@@ -822,8 +938,8 @@ var Transport = class {
     this.lastRenderedTime = quantized;
   }
   /** Records that a cue fired during the current tick (called by `Timeline`). Not usually called directly. */
-  noteCue(name) {
-    (this.pendingCueNames ??= []).push(name);
+  noteCue(event) {
+    (this.pendingCues ??= []).push(event);
   }
   frameSnap(ms) {
     return frameToMs(msToFrame(ms, this.frameRate), this.frameRate);
@@ -1218,7 +1334,7 @@ var Timeline = class _Timeline {
       const event = { name: point.name, time: point.time, direction: forward ? 1 : -1, payload: point.payload, timeline: this, frame: ctx.frame };
       try {
         handler(event);
-        this.rootTransport?.noteCue(point.name);
+        this.rootTransport?.noteCue(event);
       } catch (err) {
         (this.rootTransport?.onError ?? defaultOnError)(err);
       }

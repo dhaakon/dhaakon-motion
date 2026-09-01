@@ -34,7 +34,8 @@ export function createTrace(options: { capacity?: number } = {}): Trace {
       const now = wallNow();
       const durationMs = lastTickAt == null ? 0 : now - lastTickAt;
       lastTickAt = now;
-      trace.entries.push({ tick: tickCount, time: info.time, frame: info.frame, rate: info.rate, state, cues: info.cues ?? [], durationMs });
+      const cues = (info.cues ?? []).map((cue) => cue.name);
+      trace.entries.push({ tick: tickCount, time: info.time, frame: info.frame, rate: info.rate, state, cues, durationMs });
       if (trace.entries.length > capacity) trace.entries.splice(0, trace.entries.length - capacity);
       tickCount += 1;
     },

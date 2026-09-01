@@ -1,5 +1,5 @@
-import { T as Transport, a as TransportOutput, F as FrameRateInput, b as TimeInput, c as Timeline, d as FrameInfo, e as Tween, L as Line, M as MotionValue, f as animate, s as stagger, E as EasingFunction, g as cubicBezier, h as spring } from './core-BQhuD_zO.cjs';
-export { C as Clock, i as CueEvent, j as CueOptions, k as CycleSample, l as CycleSpec, D as Direction, m as Easing, n as EasingName, o as FrameDriver, p as FrameRate, q as FrameRates, r as FrameScheduler, t as FrameTask, I as InspectNode, u as Marker, v as MotionPrimitive, w as MotionValueShape, P as PropertyRange, R as RenderContext, x as Timecode, y as TimelineItem, z as TimelineOptions, A as TimelinePosition, B as Trace, G as TraceEntry, H as TransportOptions, J as TransportState, K as TweenOptions, N as TweenState, O as activeDuration, Q as addFrames, S as createTrace, U as defaultRenderContext, V as formatTime, W as formatTimecode, X as frameRate, Y as frameToMs, Z as framesToTimecode, _ as interpolate, $ as mix, a0 as msToFrame, a1 as msToTimecode, a2 as parseTime, a3 as parseTimecode, a4 as resolveEasing, a5 as sampleCycle, a6 as scheduler, a7 as snapToFrame, a8 as timecodeToFrames, a9 as timecodeToMs, aa as totalDuration } from './core-BQhuD_zO.cjs';
+import { d as Transport, a as TransportOutput, F as FrameRateInput, f as TimeInput, e as Timeline, g as FrameInfo, K as Keyframe, b as TrackOptions, c as Track, h as CueEvent, i as Tween, L as Line, M as MotionValue, j as animate, s as stagger, E as EasingFunction, k as cubicBezier, l as spring } from './track-cepHoOcR.cjs';
+export { C as Clock, m as CueOptions, n as CycleSample, o as CycleSpec, D as Direction, p as Easing, q as EasingInput, r as EasingName, t as EasingTuple, u as FrameDriver, v as FrameRate, w as FrameRates, x as FrameScheduler, y as FrameTask, I as InspectNode, z as Marker, A as MotionPrimitive, B as MotionValueShape, P as PropertyRange, R as RenderContext, S as SpringOptions, G as Timecode, T as TimelineItem, H as TimelineOptions, J as TimelinePosition, N as Trace, O as TraceEntry, Q as TransportOptions, U as TransportState, V as TweenOptions, W as TweenState, X as activeDuration, Y as addFrames, Z as createTrace, _ as defaultRenderContext, $ as formatTime, a0 as formatTimecode, a1 as frameRate, a2 as frameToMs, a3 as framesToTimecode, a4 as interpolate, a5 as mix, a6 as msToFrame, a7 as msToTimecode, a8 as parseTime, a9 as parseTimecode, aa as registerEasing, ab as resolveEasing, ac as sampleCycle, ad as scheduler, ae as serializeEasing, af as snapToFrame, ag as steps, ah as timecodeToFrames, ai as timecodeToMs, aj as totalDuration, ak as track } from './track-cepHoOcR.cjs';
 
 /**
  * A `Transport` meant for offline export rather than real-time playback: it
@@ -39,10 +39,34 @@ declare function frames(source: Transport | Timeline, options?: {
     to?: TimeInput;
 }): Generator<FrameInfo, void, unknown>;
 
+type MotionStyle = Record<string, number | string>;
+/** Write a `MotionStyle` value onto a DOM node: transform keys (`x`, `rotate`, `scale`, ...) collapse into one `transform`, everything else is a CSS custom/standard property. */
+declare function writeStyle(node: HTMLElement, values: MotionStyle): void;
+/** Read a `MotionStyle`-shaped starting point off a node's computed style (transform keys read as their identity value: 0, or 1 for scale). */
+declare function readStyle(node: HTMLElement, target: MotionStyle): MotionStyle;
+/** A `Track` whose `apply` writes `MotionStyle` keyframes onto a DOM node, for plain (non-React) code. */
+declare function styleTrack(node: HTMLElement, keyframes: Keyframe<MotionStyle>[], options?: Omit<TrackOptions<MotionStyle>, 'keyframes' | 'apply' | 'target'>): Track<MotionStyle>;
+
+/** Wrap a plain "draw once after every value has been written" function as a `TransportOutput` — for Canvas, a custom renderer, or anything else that just needs one call per tick. */
+declare function drawOutput(draw: (info: FrameInfo) => void, options?: {
+    name?: string;
+}): TransportOutput;
+/**
+ * Route every cue fired anywhere in the tree to `send`. The routing key is
+ * the cue's own payload — conventionally `{ signal: <whatever the receiving
+ * system understands> }`, in which case `send` receives just that inner
+ * value; a payload without a `signal` property is forwarded as-is.
+ */
+declare function signalOutput(send: (signal: unknown, cue: CueEvent, info: FrameInfo) => void, options?: {
+    filter?: (cue: CueEvent) => boolean;
+    name?: string;
+}): TransportOutput;
+
 declare const _default: {
     Tween: typeof Tween;
     Timeline: typeof Timeline;
     Transport: typeof Transport;
+    Track: typeof Track;
     Line: typeof Line;
     MotionValue: typeof MotionValue;
     animate: typeof animate;
@@ -65,4 +89,4 @@ declare const _default: {
     spring: typeof spring;
 };
 
-export { EasingFunction, FrameInfo, FrameRateInput, Line, MotionValue, OfflineTransport, type RenderFramesOptions, TimeInput, Timeline, Transport, TransportOutput, Tween, animate, cubicBezier, _default as default, frames, renderFrames, spring, stagger };
+export { CueEvent, EasingFunction, FrameInfo, FrameRateInput, Keyframe, Line, type MotionStyle, MotionValue, OfflineTransport, type RenderFramesOptions, TimeInput, Timeline, Track, TrackOptions, Transport, TransportOutput, Tween, animate, cubicBezier, _default as default, drawOutput, frames, readStyle, renderFrames, signalOutput, spring, stagger, styleTrack, writeStyle };

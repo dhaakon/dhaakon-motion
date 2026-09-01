@@ -82,3 +82,28 @@ test('a custom clock, not the scheduler driver, is the time source', () => {
   driver.step(999999); // the scheduler's own time is irrelevant once a custom clock is set
   expect(transport.time).toBe(300);
 });
+
+test('chase() converges rate to a clock running 2% fast, without hard-seeking', () => {
+  const { driver, scheduler: loop } = createTestScheduler();
+  const transport = new Transport({ scheduler: loop, duration: 1_000_000 });
+  transport.play();
+  let externalMs = 0;
+  const stepMs = 10;
+  for (let i = 0; i < 2000; i += 1) {
+    driver.advance(stepMs);
+    externalMs += stepMs * 1.02;
+    transport.chase(externalMs);
+  }
+  expect(transport.rate).toBeCloseTo(1.02, 1);
+  expect(Math.abs(transport.time - externalMs)).toBeLessThan(40); // stayed under the hard-seek threshold throughout
+});
+
+test('chase() hard-seeks once on a large jump, then resumes at rate 1', () => {
+  const { driver, scheduler: loop } = createTestScheduler();
+  const transport = new Transport({ scheduler: loop, duration: 1_000_000 });
+  transport.play();
+  driver.advance(100);
+  transport.chase(600); // 500ms away from time(100): exceeds the default 40ms threshold
+  expect(transport.time).toBe(600);
+  expect(transport.rate).toBe(1);
+});

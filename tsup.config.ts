@@ -4,6 +4,9 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     react: 'src/react.tsx',
+    three: 'src/three.ts',
+    audio: 'src/audio.ts',
+    midi: 'src/midi.ts',
     testing: 'src/testing.ts',
   },
   format: ['esm', 'cjs'],

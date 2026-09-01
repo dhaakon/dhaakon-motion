@@ -1,17 +1,18 @@
-import { type EasingFunction, type EasingName, resolveEasing } from './easing';
+import { type EasingFunction, type EasingInput, type EasingName, resolveEasing } from './easing';
 import { interpolate, type MotionValueShape } from './interpolate';
 import { scheduler, type FrameScheduler, type FrameTask } from './scheduler';
 import { sampleCycle, type Direction } from './cycle';
 import type { RenderContext, TimelineItem } from './items';
 import { frameRate, msToFrame, type FrameRateInput } from './time';
 import { msToTimecode, type Timecode } from './timecode';
+import { Track } from './track';
 
 export type TweenState = 'idle' | 'delayed' | 'running' | 'paused' | 'finished' | 'cancelled';
 export interface PropertyRange { start: number; end: number; unit?: string; }
 export interface TweenOptions<T extends MotionValueShape = number> {
   from?: T; to?: T; curve?: [T, T] | Line; properties?: Record<string, PropertyRange>; node?: HTMLElement | null;
   duration?: number; delay?: number; repeat?: number; repeatDelay?: number; yoyo?: boolean; direction?: Direction;
-  easing?: EasingFunction | EasingName; ease?: EasingFunction | EasingName; autoplay?: boolean;
+  easing?: EasingInput | EasingName; ease?: EasingInput | EasingName; autoplay?: boolean;
   onBegin?: (tween: Tween<T>) => void; onStart?: (tween: Tween<T>) => void;
   onUpdate?: (value: T, progress: number, tween: Tween<T>) => void;
   onEnd?: (tween: Tween<T>) => void; onComplete?: (tween: Tween<T>) => void;
@@ -101,6 +102,18 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
   /** The SMPTE timecode for the tween's active time, at `rate`. */
   timecodeAt(rate: FrameRateInput): Timecode { return msToTimecode(Math.max(0, this.elapsed - this.delay), frameRate(rate)); }
   getCurrentFrame(fps = 60) { return this.frameAt(fps); }
+  /**
+   * A two-keyframe `Track` equivalent to this tween's `from`/`to`/`duration`/`easing`/`repeat`/`repeatDelay`/`direction`.
+   * Its `apply` forwards sampled values to this tween's own `onUpdate` (progress is not recomputed — read `value` from the callback).
+   */
+  toTrack() {
+    return new Track<T>({
+      name: this.name,
+      keyframes: [{ at: this.delay, value: this.from }, { at: this.delay + this.duration, value: this.toValue, easing: this.easing }],
+      repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction,
+      apply: (value) => { this.value = value; this.onUpdate?.(value, this.progress, this); },
+    });
+  }
   get activeDuration() { return this.repeat === Infinity ? Infinity : this.duration * (this.repeat + 1) + this.repeatDelay * this.repeat; }
   get totalDuration() { return this.delay + this.activeDuration; }
 
