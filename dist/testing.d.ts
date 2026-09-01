@@ -1,4 +1,4 @@
-import { w as FrameDriver, z as FrameScheduler, M as MotionValueShape, l as Tween, F as FrameRateInput, e as Timeline, f as TimeInput, I as InspectNode } from './track-EtJQft_W.js';
+import { w as FrameDriver, z as FrameScheduler, e as Timeline, f as TimeInput, M as MotionValueShape, l as Tween, F as FrameRateInput, I as InspectNode } from './track-EtJQft_W.js';
 
 /**
  * A fully controllable `FrameDriver`: nothing runs until `step`/`advance` is
@@ -59,5 +59,78 @@ declare function snapshotTimeline(timeline: Timeline, times?: TimeInput[]): {
         values: Record<string, unknown>;
     }[];
 };
+/**
+ * Sample `timeline` at `at` and assert every key in `expected` matches (numbers
+ * within `tolerance`, default 1e-6; everything else by deep equality via
+ * JSON). On failure the error includes the timeline's ASCII rendering, so a
+ * failing assertion shows the whole composition, not just one wrong number.
+ */
+declare function expectSample(timeline: Timeline, at: TimeInput, expected: Record<string, unknown>, options?: {
+    tolerance?: number;
+}): void;
+declare class FakeAudioParam {
+    value: number;
+    calls: Array<{
+        type: 'ramp' | 'target';
+        value: number;
+        time: number;
+    }>;
+    linearRampToValueAtTime(value: number, time: number): void;
+    setTargetAtTime(value: number, time: number): void;
+}
+declare class FakeGainNode {
+    gain: FakeAudioParam;
+    connect(): this;
+    disconnect(): void;
+}
+declare class FakeBufferSource {
+    buffer: unknown;
+    loop: boolean;
+    playbackRate: FakeAudioParam;
+    started: boolean;
+    stopped: boolean;
+    startTime: number;
+    startOffset: number;
+    connect(): this;
+    disconnect(): void;
+    start(when?: number, offset?: number): void;
+    stop(): void;
+}
+declare class FakeAudioContext {
+    currentTime: number;
+    state: 'running' | 'suspended' | 'closed';
+    destination: {};
+    sources: FakeBufferSource[];
+    createBufferSource(): FakeBufferSource;
+    createGain(): FakeGainNode;
+    resume(): Promise<void>;
+}
+declare class FakeOfflineAudioContext extends FakeAudioContext {
+    readonly length: number;
+    readonly sampleRate: number;
+    constructor(length?: number, sampleRate?: number);
+    startRendering(): Promise<{
+        length: number;
+        sampleRate: number;
+        duration: number;
+    }>;
+}
+/** A fake `AudioContext`, typed loosely enough to pass to `audioOutput`/`AudioClip`/`paramTrack` in a test. */
+declare function fakeAudioContext(): FakeAudioContext;
+/** A fake `OfflineAudioContext` for testing `renderAudio`. */
+declare function fakeOfflineAudioContext(length?: number, sampleRate?: number): FakeOfflineAudioContext;
+/** `{ duration }` — enough of an `AudioBuffer` for `AudioClip`. */
+declare function fakeAudioBuffer(durationSeconds: number): {
+    duration: number;
+};
+declare class FakeMIDIOutput {
+    sent: Array<{
+        data: number[];
+        timestamp?: number;
+    }>;
+    send(data: number[] | Uint8Array, timestamp?: number): void;
+}
+/** A fake `MIDIOutput` for testing `midiOutput`/`noteCue`: recorded sends land in `.sent`. */
+declare function fakeMidiPort(): FakeMIDIOutput;
 
-export { ManualDriver, createTestScheduler, installFrameDriver, recordValues, runUntil, sample, snapshotTimeline, stepFrames };
+export { FakeAudioContext, FakeAudioParam, FakeBufferSource, FakeGainNode, FakeMIDIOutput, FakeOfflineAudioContext, ManualDriver, createTestScheduler, expectSample, fakeAudioBuffer, fakeAudioContext, fakeMidiPort, fakeOfflineAudioContext, installFrameDriver, recordValues, runUntil, sample, snapshotTimeline, stepFrames };

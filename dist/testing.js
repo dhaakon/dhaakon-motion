@@ -1452,9 +1452,127 @@ function snapshotTimeline(timeline, times) {
     samples: sample(timeline, sampleTimes)
   };
 }
+function expectSample(timeline, at, expected, options = {}) {
+  const tolerance = options.tolerance ?? 1e-6;
+  const ms = typeof at === "number" ? at : parseTime(at, timeline.frameRate);
+  timeline.sampleAt(ms);
+  const values = collectTweenValues(timeline, "");
+  const mismatches = [];
+  for (const [key, expectedValue] of Object.entries(expected)) {
+    const actual = values[key];
+    const matches = typeof expectedValue === "number" && typeof actual === "number" ? Math.abs(actual - expectedValue) <= tolerance : JSON.stringify(actual) === JSON.stringify(expectedValue);
+    if (!matches) mismatches.push(`  "${key}": expected ${JSON.stringify(expectedValue)}, got ${JSON.stringify(actual)}`);
+  }
+  if (mismatches.length) {
+    throw new Error(`expectSample: at ${ms}ms (${JSON.stringify(at)})
+${mismatches.join("\n")}
+
+${timeline.toAscii()}`);
+  }
+}
+var FakeAudioParam = class {
+  value = 0;
+  calls = [];
+  linearRampToValueAtTime(value, time) {
+    this.value = value;
+    this.calls.push({ type: "ramp", value, time });
+  }
+  setTargetAtTime(value, time) {
+    this.value = value;
+    this.calls.push({ type: "target", value, time });
+  }
+};
+var FakeGainNode = class {
+  gain = new FakeAudioParam();
+  connect() {
+    return this;
+  }
+  disconnect() {
+  }
+};
+var FakeBufferSource = class {
+  buffer = null;
+  loop = false;
+  playbackRate = new FakeAudioParam();
+  started = false;
+  stopped = false;
+  startTime = 0;
+  startOffset = 0;
+  connect() {
+    return this;
+  }
+  disconnect() {
+  }
+  start(when = 0, offset = 0) {
+    this.started = true;
+    this.startTime = when;
+    this.startOffset = offset;
+  }
+  stop() {
+    this.stopped = true;
+  }
+};
+var FakeAudioContext = class {
+  currentTime = 0;
+  state = "running";
+  destination = {};
+  sources = [];
+  createBufferSource() {
+    const source = new FakeBufferSource();
+    this.sources.push(source);
+    return source;
+  }
+  createGain() {
+    return new FakeGainNode();
+  }
+  async resume() {
+    this.state = "running";
+  }
+};
+var FakeOfflineAudioContext = class extends FakeAudioContext {
+  constructor(length = 1, sampleRate = 44100) {
+    super();
+    this.length = length;
+    this.sampleRate = sampleRate;
+  }
+  length;
+  sampleRate;
+  async startRendering() {
+    return { length: this.length, sampleRate: this.sampleRate, duration: this.length / this.sampleRate };
+  }
+};
+function fakeAudioContext() {
+  return new FakeAudioContext();
+}
+function fakeOfflineAudioContext(length = 1, sampleRate = 44100) {
+  return new FakeOfflineAudioContext(length, sampleRate);
+}
+function fakeAudioBuffer(durationSeconds) {
+  return { duration: durationSeconds };
+}
+var FakeMIDIOutput = class {
+  sent = [];
+  send(data, timestamp) {
+    this.sent.push({ data: Array.from(data), timestamp });
+  }
+};
+function fakeMidiPort() {
+  return new FakeMIDIOutput();
+}
 export {
+  FakeAudioContext,
+  FakeAudioParam,
+  FakeBufferSource,
+  FakeGainNode,
+  FakeMIDIOutput,
+  FakeOfflineAudioContext,
   ManualDriver,
   createTestScheduler,
+  expectSample,
+  fakeAudioBuffer,
+  fakeAudioContext,
+  fakeMidiPort,
+  fakeOfflineAudioContext,
   installFrameDriver,
   recordValues,
   runUntil,

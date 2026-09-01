@@ -2,7 +2,7 @@ import { test, expect } from 'vitest';
 import { Timeline, Transport } from '@dhaakon/motion';
 import { createTestScheduler } from '@dhaakon/motion/testing';
 import { AudioClip, audioOutput, renderAudio, audioClock } from '@dhaakon/motion/audio';
-import { FakeAudioContext, FakeOfflineAudioContext, fakeAudioBuffer } from './fakes';
+import { FakeAudioContext, FakeOfflineAudioContext, fakeAudioBuffer } from '@dhaakon/motion/testing';
 
 function setup() {
   const { driver, scheduler: loop } = createTestScheduler();

@@ -2,7 +2,7 @@ import { test, expect } from 'vitest';
 import { Timeline, Transport } from '@dhaakon/motion';
 import { createTestScheduler } from '@dhaakon/motion/testing';
 import { midi, midiOutput, noteCue } from '@dhaakon/motion/midi';
-import { FakeMIDIOutput } from './fakes';
+import { FakeMIDIOutput } from '@dhaakon/motion/testing';
 
 test('midi byte builders produce the expected status/data bytes', () => {
   expect(midi.noteOn(60, 100, 0)).toEqual([0x90, 60, 100]);

@@ -125,3 +125,79 @@ export function snapshotTimeline(timeline: Timeline, times?: TimeInput[]) {
     samples: sample(timeline, sampleTimes),
   };
 }
+
+/**
+ * Sample `timeline` at `at` and assert every key in `expected` matches (numbers
+ * within `tolerance`, default 1e-6; everything else by deep equality via
+ * JSON). On failure the error includes the timeline's ASCII rendering, so a
+ * failing assertion shows the whole composition, not just one wrong number.
+ */
+export function expectSample(timeline: Timeline, at: TimeInput, expected: Record<string, unknown>, options: { tolerance?: number } = {}) {
+  const tolerance = options.tolerance ?? 1e-6;
+  const ms = typeof at === 'number' ? at : parseTime(at, timeline.frameRate);
+  timeline.sampleAt(ms);
+  const values = collectTweenValues(timeline, '');
+  const mismatches: string[] = [];
+  for (const [key, expectedValue] of Object.entries(expected)) {
+    const actual = values[key];
+    const matches = typeof expectedValue === 'number' && typeof actual === 'number'
+      ? Math.abs(actual - expectedValue) <= tolerance
+      : JSON.stringify(actual) === JSON.stringify(expectedValue);
+    if (!matches) mismatches.push(`  "${key}": expected ${JSON.stringify(expectedValue)}, got ${JSON.stringify(actual)}`);
+  }
+  if (mismatches.length) {
+    throw new Error(`expectSample: at ${ms}ms (${JSON.stringify(at)})\n${mismatches.join('\n')}\n\n${timeline.toAscii()}`);
+  }
+}
+
+// ---- Web Audio / Web MIDI fakes --------------------------------------------
+// jsdom and node have neither API; these are minimal stand-ins for testing
+// ./audio and ./midi compositions without a real browser.
+
+export class FakeAudioParam {
+  value = 0;
+  calls: Array<{ type: 'ramp' | 'target'; value: number; time: number }> = [];
+  linearRampToValueAtTime(value: number, time: number) { this.value = value; this.calls.push({ type: 'ramp', value, time }); }
+  setTargetAtTime(value: number, time: number) { this.value = value; this.calls.push({ type: 'target', value, time }); }
+}
+export class FakeGainNode {
+  gain = new FakeAudioParam();
+  connect() { return this; }
+  disconnect() {}
+}
+export class FakeBufferSource {
+  buffer: unknown = null;
+  loop = false;
+  playbackRate = new FakeAudioParam();
+  started = false; stopped = false; startTime = 0; startOffset = 0;
+  connect() { return this; }
+  disconnect() {}
+  start(when = 0, offset = 0) { this.started = true; this.startTime = when; this.startOffset = offset; }
+  stop() { this.stopped = true; }
+}
+export class FakeAudioContext {
+  currentTime = 0;
+  state: 'running' | 'suspended' | 'closed' = 'running';
+  destination = {};
+  sources: FakeBufferSource[] = [];
+  createBufferSource(): FakeBufferSource { const source = new FakeBufferSource(); this.sources.push(source); return source; }
+  createGain(): FakeGainNode { return new FakeGainNode(); }
+  async resume() { this.state = 'running'; }
+}
+export class FakeOfflineAudioContext extends FakeAudioContext {
+  constructor(readonly length = 1, readonly sampleRate = 44100) { super(); }
+  async startRendering() { return { length: this.length, sampleRate: this.sampleRate, duration: this.length / this.sampleRate }; }
+}
+/** A fake `AudioContext`, typed loosely enough to pass to `audioOutput`/`AudioClip`/`paramTrack` in a test. */
+export function fakeAudioContext(): FakeAudioContext { return new FakeAudioContext(); }
+/** A fake `OfflineAudioContext` for testing `renderAudio`. */
+export function fakeOfflineAudioContext(length = 1, sampleRate = 44100): FakeOfflineAudioContext { return new FakeOfflineAudioContext(length, sampleRate); }
+/** `{ duration }` — enough of an `AudioBuffer` for `AudioClip`. */
+export function fakeAudioBuffer(durationSeconds: number) { return { duration: durationSeconds }; }
+
+export class FakeMIDIOutput {
+  sent: Array<{ data: number[]; timestamp?: number }> = [];
+  send(data: number[] | Uint8Array, timestamp?: number) { this.sent.push({ data: Array.from(data), timestamp }); }
+}
+/** A fake `MIDIOutput` for testing `midiOutput`/`noteCue`: recorded sends land in `.sent`. */
+export function fakeMidiPort(): FakeMIDIOutput { return new FakeMIDIOutput(); }

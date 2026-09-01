@@ -8,6 +8,7 @@ export default defineConfig({
     audio: 'src/audio.ts',
     midi: 'src/midi.ts',
     testing: 'src/testing.ts',
+    devtools: 'src/devtools.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,
