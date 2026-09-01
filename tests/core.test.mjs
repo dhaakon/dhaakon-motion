@@ -56,3 +56,11 @@ test('infinite repeat remains finite and stays on the frame loop', () => {
   driver.step(1500); assert.equal(tween.value, 0.5); assert.equal(tween.state, 'running');
   assert.ok(Number.isFinite(tween.value)); assert.equal(loop.size, 1);
 });
+
+test('infinite repeat can seek and reverse within its current cycle', () => {
+  const driver = new ManualDriver(); const loop = new FrameScheduler(driver);
+  const tween = new Tween({ from: 0, to: 1, duration: 1000, repeat: Infinity, yoyo: true, easing: 'linear', scheduler: loop }).play();
+  tween.seek(0.78); assert.equal(tween.value, 0.78); assert.ok(Number.isFinite(tween.elapsed));
+  tween.reverse(); assert.ok(Math.abs(tween.value - 0.78) < 1e-10); assert.ok(Number.isFinite(tween.elapsed));
+  driver.step(100); assert.ok(tween.value < 0.78); assert.ok(Number.isFinite(tween.value));
+});

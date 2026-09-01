@@ -260,15 +260,22 @@ var Tween = class {
   reverse() {
     const active = Math.max(0, this.elapsed - this.delay);
     this.isReversed = !this.isReversed;
-    this.elapsed = this.delay + Math.max(0, this.activeDuration - active);
+    if (this.repeat === Infinity) {
+      const cycleDuration = Math.max(1, this.duration + this.repeatDelay);
+      const iteration = Math.floor(active / cycleDuration);
+      const cycleTime = Math.min(this.duration, Math.max(0, active - iteration * cycleDuration));
+      this.elapsed = this.delay + iteration * cycleDuration + Math.max(0, this.duration - cycleTime);
+    } else this.elapsed = this.delay + Math.max(0, this.activeDuration - active);
     if (this.isAnimating) this.startedAt = this.frameLoop.now() - this.elapsed;
     this.sampleAt(this.elapsed);
     return this;
   }
   seek(progress) {
-    return this.seekTime(this.delay + Math.max(0, Math.min(1, progress)) * this.activeDuration);
+    const seekDuration = this.repeat === Infinity ? this.duration : this.activeDuration;
+    return this.seekTime(this.delay + Math.max(0, Math.min(1, progress)) * seekDuration);
   }
   seekTime(milliseconds) {
+    if (!Number.isFinite(milliseconds)) return this;
     this.elapsed = Math.max(0, Math.min(this.totalDuration, milliseconds));
     this.sampleAt(this.elapsed);
     if (this.isAnimating) this.startedAt = this.frameLoop.now() - this.elapsed;

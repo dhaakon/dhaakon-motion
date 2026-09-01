@@ -73,12 +73,23 @@ export class Tween<T extends MotionValueShape = number> {
   cancel() { this.removeFrame?.(); this.isAnimating = false; this.isPaused = false; this.state = 'cancelled'; this.resolveFinished(this); return this; }
   reverse() {
     const active = Math.max(0, this.elapsed - this.delay); this.isReversed = !this.isReversed;
-    this.elapsed = this.delay + Math.max(0, this.activeDuration - active);
+    if (this.repeat === Infinity) {
+      const cycleDuration = Math.max(1, this.duration + this.repeatDelay);
+      const iteration = Math.floor(active / cycleDuration);
+      const cycleTime = Math.min(this.duration, Math.max(0, active - iteration * cycleDuration));
+      this.elapsed = this.delay + iteration * cycleDuration + Math.max(0, this.duration - cycleTime);
+    } else this.elapsed = this.delay + Math.max(0, this.activeDuration - active);
     if (this.isAnimating) this.startedAt = this.frameLoop.now() - this.elapsed;
     this.sampleAt(this.elapsed); return this;
   }
-  seek(progress: number) { return this.seekTime(this.delay + Math.max(0, Math.min(1, progress)) * this.activeDuration); }
-  seekTime(milliseconds: number) { this.elapsed = Math.max(0, Math.min(this.totalDuration, milliseconds)); this.sampleAt(this.elapsed); if (this.isAnimating) this.startedAt = this.frameLoop.now() - this.elapsed; return this; }
+  seek(progress: number) {
+    const seekDuration = this.repeat === Infinity ? this.duration : this.activeDuration;
+    return this.seekTime(this.delay + Math.max(0, Math.min(1, progress)) * seekDuration);
+  }
+  seekTime(milliseconds: number) {
+    if (!Number.isFinite(milliseconds)) return this;
+    this.elapsed = Math.max(0, Math.min(this.totalDuration, milliseconds)); this.sampleAt(this.elapsed); if (this.isAnimating) this.startedAt = this.frameLoop.now() - this.elapsed; return this;
+  }
   setDuration(duration: number) { this.duration = Math.max(0, duration); return this; }
   getCurrentFrame(fps = 60) { return Math.ceil((Math.max(0, this.elapsed - this.delay) / 1000) * fps); }
   get activeDuration() { return this.repeat === Infinity ? Infinity : this.duration * (this.repeat + 1) + this.repeatDelay * this.repeat; }

@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Badge, Button } from '@dhaakon/ui';
 import { Timeline, Tween, scheduler } from '@dhaakon/motion';
-import { Motion, MotionConfig, Reveal, motion, useMotionValue, useMotionValueState } from '@dhaakon/motion/react';
+import { Motion, MotionConfig, Reveal, motion, useInView, useMotionValue, useMotionValueState } from '@dhaakon/motion/react';
+
+const ThreeShowcase = lazy(() => import('./ThreeShowcase').then((module) => ({ default: module.ThreeShowcase })));
 
 const tweenCode = `import { Tween, Easing } from '@dhaakon/motion';
 
@@ -120,6 +122,59 @@ function SignalCanvas() {
     });
     return () => tween.cancel();
   }, [signal]);
+
+  return <canvas ref={canvas} />;
+}`;
+
+const threeReactCode = `import { MotionValue, Timeline, Tween } from '@dhaakon/motion';
+import { useEffect, useRef } from 'react';
+import * as THREE from 'three';
+
+function ThreeProductionSequence() {
+  const canvas = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const { renderer, scene, camera, rig, material, lights, particles } =
+      createThreeScene(canvas.current!);
+
+    const frame = new MotionValue({
+      camera: { position: [0, 1, 9], fov: 44 },
+      rig: { rotation: [0, 0, 0], scale: 0.7 },
+      shader: { energy: 0.2, accent: '#ff5a1f' },
+      light: { key: 20, fill: 12, exposure: 0.7 },
+      particles: { size: 0.01, opacity: 0.15 }
+    });
+
+    // One subscription can write any property in any renderer.
+    const unsubscribe = frame.subscribe(() => {
+      const value = frame.get();
+      camera.position.fromArray(value.camera.position);
+      camera.fov = value.camera.fov;
+      rig.rotation.fromArray(value.rig.rotation);
+      rig.scale.setScalar(value.rig.scale);
+      material.uniforms.uEnergy.value = value.shader.energy;
+      material.uniforms.uAccent.value.setStyle(value.shader.accent);
+      lights.key.intensity = value.light.key;
+      lights.fill.intensity = value.light.fill;
+      renderer.toneMappingExposure = value.light.exposure;
+      particles.material.size = value.particles.size;
+      particles.material.opacity = value.particles.opacity;
+    });
+
+    const show = new Timeline({
+      repeat: Infinity,
+      yoyo: true,
+      onUpdate: () => renderer.render(scene, camera)
+    }).add(new Tween({
+      from: frame.get(),
+      to: finaleState,
+      duration: 9200,
+      easing: 'dhaakon',
+      onUpdate: value => frame.set(value)
+    }), 0).play();
+
+    return () => { show.stop(); unsubscribe(); renderer.dispose(); };
+  }, []);
 
   return <canvas ref={canvas} />;
 }`;
@@ -248,16 +303,35 @@ function CodePanel({ delay = 0, children }: { delay?: number; children: React.Re
   return <Reveal className="code-panel" from={{ y: 24, opacity: 0 }} transition={{ duration: 480, delay }}>{children}</Reveal>;
 }
 
+function DeferredThreeShowcase() {
+  const [ref, nearViewport] = useInView<HTMLDivElement>({ once: true, margin: '700px 0px' });
+  return <div className="three-deferred" ref={ref}>{nearViewport
+    ? <Suspense fallback={<div className="three-loading">INITIALIZING WEBGL RENDER TARGET…</div>}><ThreeShowcase/></Suspense>
+    : <div className="three-loading">THREE.JS COMPOSITION LOADS NEAR VIEWPORT</div>}
+  </div>;
+}
+
 export function App({ version }: { version: string }) {
+  useEffect(() => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (!id) return;
+    const frame = requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    }));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   return <MotionConfig transition={{ duration: 360, easing: 'dhaakon' }}>
-    <motion.header className="site-head" initial={{ y: -18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 440 }}><a className="wordmark" href="#top"><i>◇</i> DHAAKON / MOTION</a><nav><a href="#playground">Playground</a><a href="#react">React</a><a href="#compositions">Compositions</a><a href="#api">API</a></nav><Badge tone="accent">v{version}</Badge></motion.header>
+    <motion.header className="site-head" initial={{ y: -18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 440 }}><a className="wordmark" href="#top"><i>◇</i> DHAAKON / MOTION</a><nav><a href="#why">Why</a><a href="#playground">Playground</a><a href="#react">React</a><a href="#compositions">Compositions</a><a href="#three">Three.js</a><a href="#api">API</a></nav><Badge tone="accent">v{version}</Badge></motion.header>
     <main id="top">
       <section className="hero"><div className="hero-copy"><motion.p className="eyebrow" initial={{ y: 16, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 100 }}>[ MOTION SYSTEM 02 ] · BUILT FROM DHAAK-ANIM</motion.p><motion.h1 initial={{ y: 28, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 160 }}>Movement with<br/><em>direction.</em></motion.h1><motion.p className="lead" initial={{ y: 22, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 240 }}>A compact tween engine for interfaces, timelines, canvas, and React compositions. One frame loop. Zero core dependencies.</motion.p><motion.div className="install" initial={{ y: 18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 320 }}><code>npm i @dhaakon/motion</code><span>↗ VERDACCIO :21760</span></motion.div></div><HeroOrbit /></section>
       <section className="metrics">{[['1','shared frame loop'],['0','core dependencies'],['2','entry points'],[String(scheduler.size),'active right now']].map(([value,label], index) => <Reveal as="div" key={label} from={{ y: 20, opacity: 0 }} transition={{ delay: index * 65 }}><strong>{value}</strong><span>{label}</span></Reveal>)}</section>
-      <section className="section" id="playground"><SectionTitle number="01" title="Core playground" subtitle="The old syntax remains familiar; the clock underneath is entirely new."/><div className="demo-grid"><RevealCell delay={0}><TweenPlayground/></RevealCell><RevealCell delay={70}><EasingTracks/></RevealCell><RevealCell delay={140}><TimelinePlayground/></RevealCell><RevealCell delay={210}><MotionValueDemo/></RevealCell></div></section>
-      <section className="section inverse" id="react"><SectionTitle number="02" title="React, composed" subtitle="Declarative when it helps. Imperative at the frame boundary."/><div className="demo-grid"><RevealCell delay={0}><ReactComposition/></RevealCell><RevealCell delay={90}><RenderPropDemo/></RevealCell></div><div className="code-grid"><CodePanel><h3>DOM composition</h3><p>Use <code>motion.*</code> for transform and style animation without a React render on every frame.</p><Code>{reactCode}</Code></CodePanel><CodePanel delay={100}><h3>Reveal on scroll</h3><p><code>Reveal</code>, <code>whileInView</code>, and <code>useInView</code> share the same observer and respect reduced-motion preferences.</p><Code>{revealCode}</Code></CodePanel></div></section>
-      <section className="section compositions-section" id="compositions"><SectionTitle number="03" title="Production compositions" subtitle="Complete patterns for cueing, application state, and non-DOM render targets."/><div className="complex-stack"><ComplexExample number="03.1" title="Overlapping cue stack" description="A labeled Timeline drives four technical-direction cues from one deterministic clock. Replay, pause, seek, or reverse the entire stack as a unit." code={cueReactCode}><CueSequenceExample/></ComplexExample><ComplexExample number="03.2" title="State-driven scene" description="React owns the semantic state while motion interpolates between rehearsal, preview, and live visual states without remounting the composition." code={stateReactCode}><SceneStateExample/></ComplexExample><ComplexExample number="03.3" title="Canvas signal renderer" description="A MotionValue feeds a custom canvas renderer directly. React mounts the composition; the shared frame loop handles every subsequent draw." code={canvasReactCode}><CanvasSignalExample/></ComplexExample></div></section>
-      <section className="section" id="api"><SectionTitle number="04" title="Small surface, deep control" subtitle="Every primitive can be used alone or nested into a composition."/><div className="api-grid"><Api index={0} name="Tween" text="Play, pause, stop, cancel, reverse, seek, repeat, yoyo, delay, and await finished."/><Api index={1} name="Timeline" text="Sequence or overlap tweens with milliseconds, labels, <, >, and relative offsets."/><Api index={2} name="MotionValue" text="Observable animation state for React, canvas, WebGL, audio, and custom renderers."/><Api index={3} name="motion.*" text="Typed React elements with animate, whileInView, viewport, and reduced-motion handling."/><Api index={4} name="interpolate" text="Numbers, unit strings, colors, arrays, and deeply nested objects."/><Api index={5} name="FrameScheduler" text="One requestAnimationFrame for every active tween; injectable for deterministic tests."/></div><div className="code-grid"><CodePanel><Code>{tweenCode}</Code></CodePanel><CodePanel delay={100}><Code>{timelineCode}</Code></CodePanel></div></section>
+      <section className="section why-section" id="why"><SectionTitle number="01" title="Animation is a systems problem" subtitle="A transition moves one element. An engine coordinates an experience."/><div className="why-intro"><Reveal className="why-thesis" from={{ x: -30, opacity: 0 }}><p className="eyebrow">[ THE PRODUCTION THRESHOLD ]</p><h3>Time becomes infrastructure when more than one thing must move together.</h3><p>CSS is ideal for an isolated hover or disclosure. The moment a cue must synchronize a camera, shader, DOM overlay, waveform, particles, and audio envelope—and still pause, seek, reverse, test, and honor reduced motion—you need one authority for time.</p></Reveal><div className="why-points">{[['01','One clock','Independent timers drift. A shared scheduler keeps every renderer on the same frame.'],['02','Real control','Timelines make a whole composition pauseable, reversible, seekable, repeatable, and deterministic.'],['03','Renderer freedom','Values are not CSS. The same interpolation can target React, SVG, Canvas, WebGL, audio, or hardware.'],['04','Separation','Application state describes intent; the engine resolves time; each renderer writes its own pixels.']].map(([number,title,text], index) => <Reveal as="article" key={title} from={{ y: 24, opacity: 0 }} transition={{ delay: index * 65 }}><span>{number}</span><h4>{title}</h4><p>{text}</p></Reveal>)}</div></div><Reveal className="engine-map" from={{ y: 34, opacity: 0 }} amount={0.2}><div className="engine-intent"><small>APPLICATION INTENT</small><strong>“Take scene live”</strong></div><i>→</i><div className="engine-clock"><small>DHAAKON MOTION</small><strong>Timeline + one frame loop</strong><span>pause · seek · reverse · test</span></div><i>→</i><div className="engine-targets">{['DOM','SVG','CANVAS','THREE.JS','AUDIO'].map((target) => <b key={target}>{target}</b>)}</div></Reveal></section>
+      <section className="section" id="playground"><SectionTitle number="02" title="Core playground" subtitle="The old syntax remains familiar; the clock underneath is entirely new."/><div className="demo-grid"><RevealCell delay={0}><TweenPlayground/></RevealCell><RevealCell delay={70}><EasingTracks/></RevealCell><RevealCell delay={140}><TimelinePlayground/></RevealCell><RevealCell delay={210}><MotionValueDemo/></RevealCell></div></section>
+      <section className="section inverse" id="react"><SectionTitle number="03" title="React, composed" subtitle="Declarative when it helps. Imperative at the frame boundary."/><div className="demo-grid"><RevealCell delay={0}><ReactComposition/></RevealCell><RevealCell delay={90}><RenderPropDemo/></RevealCell></div><div className="code-grid"><CodePanel><h3>DOM composition</h3><p>Use <code>motion.*</code> for transform and style animation without a React render on every frame.</p><Code>{reactCode}</Code></CodePanel><CodePanel delay={100}><h3>Reveal on scroll</h3><p><code>Reveal</code>, <code>whileInView</code>, and <code>useInView</code> share the same observer and respect reduced-motion preferences.</p><Code>{revealCode}</Code></CodePanel></div></section>
+      <section className="section compositions-section" id="compositions"><SectionTitle number="04" title="Production compositions" subtitle="Complete patterns for cueing, application state, and non-DOM render targets."/><div className="complex-stack"><ComplexExample number="04.1" title="Overlapping cue stack" description="A labeled Timeline drives four technical-direction cues from one deterministic clock. Replay, pause, seek, or reverse the entire stack as a unit." code={cueReactCode}><CueSequenceExample/></ComplexExample><ComplexExample number="04.2" title="State-driven scene" description="React owns the semantic state while motion interpolates between rehearsal, preview, and live visual states without remounting the composition." code={stateReactCode}><SceneStateExample/></ComplexExample><ComplexExample number="04.3" title="Canvas signal renderer" description="A MotionValue feeds a custom canvas renderer directly. React mounts the composition; the shared frame loop handles every subsequent draw." code={canvasReactCode}><CanvasSignalExample/></ComplexExample></div></section>
+      <section className="section three-section" id="three"><SectionTitle number="05" title="One clock. Every property." subtitle="A live Three.js production sequence driven by the same renderer-agnostic values used everywhere else."/><Reveal className="three-shell" from={{ y: 42, opacity: 0 }} amount={0.08} transition={{ duration: 700 }}><DeferredThreeShowcase/></Reveal><div className="three-explain"><Reveal className="three-copy" from={{ x: -28, opacity: 0 }}><p className="eyebrow">[ REACT × MOTION × THREE.JS ]</p><h3>This is not a spinning-cube demo.</h3><p>One 9.2-second timeline interpolates deeply nested objects and writes them directly into the Three.js scene graph. It coordinates the camera, focal length, scene transforms, procedural shader uniforms, colors, three light rigs, fog density, tone-mapping exposure, 2,200 particles, orbital geometry, and the HTML telemetry overlay.</p><p>React mounts the renderer and owns the controls. It does not rerender at 60fps. Dhaakon Motion advances one deterministic clock, and Three.js renders once after every group of property writes.</p><div className="channel-grid">{[['01','Camera','position · target · FOV · roll'],['02','Scene graph','position · rotation · scale'],['03','GPU shader','time · energy · two colors'],['04','Lighting','color · intensity · exposure · fog'],['05','Particles','size · opacity · transform'],['06','Interface','phase · clock · scrubber · telemetry']].map(([number,title,properties]) => <div key={title}><span>{number}</span><b>{title}</b><small>{properties}</small></div>)}</div></Reveal><CodePanel delay={100}><h3>React renderer binding</h3><p>A <code>MotionValue</code> subscription is the adapter. No Three.js-specific API is required inside the engine.</p><Code>{threeReactCode}</Code></CodePanel></div></section>
+      <section className="section" id="api"><SectionTitle number="06" title="Small surface, deep control" subtitle="Every primitive can be used alone or nested into a composition."/><div className="api-grid"><Api index={0} name="Tween" text="Play, pause, stop, cancel, reverse, seek, repeat, yoyo, delay, and await finished."/><Api index={1} name="Timeline" text="Sequence or overlap tweens with milliseconds, labels, <, >, and relative offsets."/><Api index={2} name="MotionValue" text="Observable animation state for React, canvas, WebGL, audio, and custom renderers."/><Api index={3} name="motion.*" text="Typed React elements with animate, whileInView, viewport, and reduced-motion handling."/><Api index={4} name="interpolate" text="Numbers, unit strings, colors, arrays, and deeply nested objects."/><Api index={5} name="FrameScheduler" text="One requestAnimationFrame for every active tween; injectable for deterministic tests."/></div><div className="code-grid"><CodePanel><Code>{tweenCode}</Code></CodePanel><CodePanel delay={100}><Code>{timelineCode}</Code></CodePanel></div></section>
       <section className="principles"><Reveal className="principles-label" from={{ x: -24, opacity: 0 }}><p className="eyebrow">[ OPERATING PRINCIPLES ]</p></Reveal><div>{['Motion clarifies state.','Composition beats choreography.','Reduced motion is a first-class mode.'].map((line,index) => <Reveal key={line} from={{ x: 32, opacity: 0 }} transition={{ delay: index * 90 }}><h2>{line}</h2></Reveal>)}</div></section>
     </main>
     <footer><span>◇ DHAAKON MOTION</span><span>MIT · TYPESCRIPT · REACT 18/19</span><a href="http://dhaakon-ubuntu:21724/dhaakon-ubuntu/dhaakon-motion">SOURCE ↗</a></footer>

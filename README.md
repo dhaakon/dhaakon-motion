@@ -94,6 +94,44 @@ React 18 and 19 are optional peer dependencies. Importing the core never loads R
 
 Reveal observers disconnect after the first entrance by default, and resolve immediately when reduced motion is requested. Use `once={false}` when a composition should respond each time it crosses the viewport.
 
+## Custom renderers and Three.js
+
+For one isolated hover, CSS is usually enough. Use a motion engine when several systems must share timing and controls: a scene graph, camera, shader, DOM overlay, audio envelope, or any other render target that must pause, seek, reverse, repeat, and test as one composition.
+
+`MotionValue` is the renderer boundary. Subscribe once and write the current value into any external API; React only owns setup and teardown.
+
+```tsx
+useEffect(() => {
+  const frame = new MotionValue({
+    camera: [0, 1, 9],
+    rotation: [0, 0, 0],
+    energy: 0.2,
+    light: '#ff5a1f',
+  });
+
+  const unsubscribe = frame.subscribe(() => {
+    const value = frame.get();
+    camera.position.fromArray(value.camera);
+    rig.rotation.fromArray(value.rotation);
+    shader.uniforms.uEnergy.value = value.energy;
+    keyLight.color.setStyle(value.light);
+  });
+
+  const show = new Timeline({
+    onUpdate: () => renderer.render(scene, camera),
+  }).add(new Tween({
+    from: frame.get(),
+    to: finaleState,
+    duration: 9200,
+    onUpdate: (value) => frame.set(value),
+  })).play();
+
+  return () => { show.stop(); unsubscribe(); renderer.dispose(); };
+}, []);
+```
+
+The live documentation contains the complete Three.js example, including procedural shaders, lighting, particles, camera animation, telemetry, and transport controls. Three.js remains a documentation-only development dependency; the published motion core has zero runtime dependencies.
+
 ## Development
 
 ```sh
