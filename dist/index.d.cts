@@ -1,5 +1,5 @@
-import { d as Transport, a as TransportOutput, F as FrameRateInput, f as TimeInput, e as Timeline, g as FrameInfo, K as Keyframe, b as TrackOptions, c as Track, h as CueEvent, i as Tween, L as Line, M as MotionValue, j as animate, s as stagger, E as EasingFunction, k as cubicBezier, l as spring } from './track-cepHoOcR.cjs';
-export { C as Clock, m as CueOptions, n as CycleSample, o as CycleSpec, D as Direction, p as Easing, q as EasingInput, r as EasingName, t as EasingTuple, u as FrameDriver, v as FrameRate, w as FrameRates, x as FrameScheduler, y as FrameTask, I as InspectNode, z as Marker, A as MotionPrimitive, B as MotionValueShape, P as PropertyRange, R as RenderContext, S as SpringOptions, G as Timecode, T as TimelineItem, H as TimelineOptions, J as TimelinePosition, N as Trace, O as TraceEntry, Q as TransportOptions, U as TransportState, V as TweenOptions, W as TweenState, X as activeDuration, Y as addFrames, Z as createTrace, _ as defaultRenderContext, $ as formatTime, a0 as formatTimecode, a1 as frameRate, a2 as frameToMs, a3 as framesToTimecode, a4 as interpolate, a5 as mix, a6 as msToFrame, a7 as msToTimecode, a8 as parseTime, a9 as parseTimecode, aa as registerEasing, ab as resolveEasing, ac as sampleCycle, ad as scheduler, ae as serializeEasing, af as snapToFrame, ag as steps, ah as timecodeToFrames, ai as timecodeToMs, aj as totalDuration, ak as track } from './track-cepHoOcR.cjs';
+import { d as Transport, a as TransportOutput, F as FrameRateInput, f as TimeInput, e as Timeline, g as FrameInfo, K as Keyframe, b as TrackOptions, c as Track, h as CueEvent, i as TweenOptions, M as MotionValueShape, E as EasingInput, j as MotionValue, k as EasingFunction, T as TimelineItem, l as Tween, L as Line, m as animate, s as stagger, n as cubicBezier, o as spring } from './track-EtJQft_W.cjs';
+export { C as Clock, p as CueOptions, q as CycleSample, r as CycleSpec, D as Direction, t as Easing, u as EasingName, v as EasingTuple, w as FrameDriver, x as FrameRate, y as FrameRates, z as FrameScheduler, A as FrameTask, I as InspectNode, B as Marker, G as MotionPrimitive, P as PropertyRange, R as RenderContext, S as SpringOptions, H as Timecode, J as TimelineOptions, N as TimelinePosition, O as Trace, Q as TraceEntry, U as TransportOptions, V as TransportState, W as TweenState, X as activeDuration, Y as addFrames, Z as createTrace, _ as defaultRenderContext, $ as formatTime, a0 as formatTimecode, a1 as frameRate, a2 as frameToMs, a3 as framesToTimecode, a4 as interpolate, a5 as mix, a6 as msToFrame, a7 as msToTimecode, a8 as parseTime, a9 as parseTimecode, aa as registerEasing, ab as resolveEasing, ac as sampleCycle, ad as scheduler, ae as serializeEasing, af as snapToFrame, ag as steps, ah as timecodeToFrames, ai as timecodeToMs, aj as totalDuration, ak as track } from './track-EtJQft_W.cjs';
 
 /**
  * A `Transport` meant for offline export rather than real-time playback: it
@@ -62,6 +62,151 @@ declare function signalOutput(send: (signal: unknown, cue: CueEvent, info: Frame
     name?: string;
 }): TransportOutput;
 
+type SheetDirection = 'normal' | 'alternate';
+interface SheetMarker {
+    name: string;
+    at: TimeInput;
+    color?: string;
+    payload?: unknown;
+}
+interface SheetCue {
+    name: string;
+    at: TimeInput;
+    payload?: unknown;
+    once?: boolean;
+}
+interface SheetRegion {
+    name: string;
+    from: TimeInput;
+    to: TimeInput;
+    payload?: unknown;
+    once?: boolean;
+}
+interface TweenSheetItem {
+    type: 'tween';
+    name?: string;
+    at?: TimeInput;
+    target?: string;
+    from: MotionValueShape;
+    to: MotionValueShape;
+    duration?: TimeInput;
+    delay?: TimeInput;
+    repeat?: number;
+    repeatDelay?: TimeInput;
+    yoyo?: boolean;
+    easing?: EasingInput;
+}
+interface TrackSheetItem {
+    type: 'track';
+    name?: string;
+    at?: TimeInput;
+    target?: string;
+    repeat?: number;
+    repeatDelay?: TimeInput;
+    direction?: SheetDirection;
+    easing?: EasingInput;
+    keyframes: Array<{
+        at: TimeInput;
+        value: MotionValueShape;
+        easing?: EasingInput;
+    }>;
+}
+interface TimelineSheetItem {
+    type: 'timeline';
+    name?: string;
+    at?: TimeInput;
+    frameRate?: FrameRateInput;
+    repeat?: number;
+    repeatDelay?: TimeInput;
+    direction?: SheetDirection;
+    markers?: SheetMarker[];
+    cues?: SheetCue[];
+    regions?: SheetRegion[];
+    items: SheetItem[];
+}
+interface ExtensionSheetItem {
+    type: string;
+    name?: string;
+    at?: TimeInput;
+    [key: string]: unknown;
+}
+type SheetItem = TweenSheetItem | TrackSheetItem | TimelineSheetItem | ExtensionSheetItem;
+interface CueSheet {
+    $schema: 'dhaakon-motion/cue-sheet/1';
+    name?: string;
+    frameRate?: FrameRateInput;
+    duration?: TimeInput;
+    repeat?: number;
+    repeatDelay?: TimeInput;
+    direction?: SheetDirection;
+    markers?: SheetMarker[];
+    cues?: SheetCue[];
+    regions?: SheetRegion[];
+    items: SheetItem[];
+}
+interface SheetBindings {
+    /** Named write targets a `tween`/`track` item's `target` resolves against. */
+    targets?: Record<string, MotionValue<any> | ((value: any) => void)>;
+    /** Handlers for named cues; a cue without one still fires (and its payload still reaches a `signalOutput`/`midiOutput`). */
+    cues?: Record<string, (e: CueEvent) => void>;
+    /** Registered under their own name for the duration of this load, in addition to the global easing registry. */
+    easings?: Record<string, EasingFunction>;
+    /** Escape hatch for item types the core doesn't know natively (e.g. `'audio'`, built from `./audio`'s `AudioClip`). */
+    createItem?: (item: SheetItem, ctx: {
+        bindings: SheetBindings;
+        strict: boolean;
+    }) => TimelineItem | undefined;
+}
+/** Build a live `Timeline` (with a nested `Timeline`/`Tween`/`Track` for every item) from a `CueSheet`. */
+declare function loadSheet(sheet: CueSheet | string, bindings?: SheetBindings, options?: {
+    strict?: boolean;
+}): Timeline;
+/** `loadSheet`'s inverse: read a `Timeline` back into a `CueSheet`. Positions are saved as milliseconds; target bindings round-trip if the timeline was itself built with `loadSheet`. */
+declare function saveSheet(timeline: Timeline): CueSheet;
+interface ValidationError {
+    path: string;
+    message: string;
+}
+type ValidationResult = {
+    ok: true;
+    sheet: CueSheet;
+} | {
+    ok: false;
+    errors: ValidationError[];
+};
+/** Hand-rolled structural validation: shape, frame rate legality, resolvable easings, and keyframe ordering (where checkable without a frame-rate context). */
+declare function validateSheet(input: unknown): ValidationResult;
+type SceneState = Record<string, MotionValueShape>;
+interface SceneFile {
+    $schema: 'dhaakon-motion/scene/1';
+    states: Record<string, SceneState>;
+}
+type TargetMap = SheetBindings['targets'];
+/** Read the current value of every `MotionValue` target (a plain setter has nothing to read back, so it's skipped). */
+declare function captureScene(targets: TargetMap): SceneState;
+interface ApplySceneOptions {
+    transition?: Omit<TweenOptions<MotionValueShape>, 'from' | 'to' | 'onUpdate'> & {
+        stagger?: number | ((id: string, index: number) => number);
+    };
+}
+/** Write a captured (or hand-authored) scene onto its targets: immediately, or (with `transition`) as a playing `Timeline` of one `Tween` per target. */
+declare function applyScene(state: SceneState, targets: TargetMap, options?: ApplySceneOptions): Timeline | void;
+interface SceneTransitionOptions {
+    duration?: TimeInput;
+    easing?: EasingInput;
+    delay?: TimeInput;
+    stagger?: number | ((id: string, index: number) => number);
+}
+/** A `Timeline` (not auto-played) of one `Tween` per key present in `from` or `to`, ready to attach to a transport or `.play()`. */
+declare function sceneTransition(from: SceneState, to: SceneState, targets: TargetMap, options?: SceneTransitionOptions): Timeline;
+interface SceneSheetOptions {
+    hold?: TimeInput;
+    transition?: TimeInput;
+    easing?: EasingInput;
+}
+/** Turn a named sequence of scene states into a `CueSheet`: one `track` item per key (a keyframe per state it appears in) plus a marker at each state's start. */
+declare function sceneSheet(states: Record<string, SceneState>, order: string[], options?: SceneSheetOptions): CueSheet;
+
 declare const _default: {
     Tween: typeof Tween;
     Timeline: typeof Timeline;
@@ -89,4 +234,4 @@ declare const _default: {
     spring: typeof spring;
 };
 
-export { CueEvent, EasingFunction, FrameInfo, FrameRateInput, Keyframe, Line, type MotionStyle, MotionValue, OfflineTransport, type RenderFramesOptions, TimeInput, Timeline, Track, TrackOptions, Transport, TransportOutput, Tween, animate, cubicBezier, _default as default, drawOutput, frames, readStyle, renderFrames, signalOutput, spring, stagger, styleTrack, writeStyle };
+export { type ApplySceneOptions, CueEvent, type CueSheet, EasingFunction, EasingInput, type ExtensionSheetItem, FrameInfo, FrameRateInput, Keyframe, Line, type MotionStyle, MotionValue, MotionValueShape, OfflineTransport, type RenderFramesOptions, type SceneFile, type SceneSheetOptions, type SceneState, type SceneTransitionOptions, type SheetBindings, type SheetCue, type SheetDirection, type SheetItem, type SheetMarker, type SheetRegion, TimeInput, Timeline, TimelineItem, type TimelineSheetItem, Track, TrackOptions, type TrackSheetItem, Transport, TransportOutput, Tween, TweenOptions, type TweenSheetItem, type ValidationError, type ValidationResult, animate, applyScene, captureScene, cubicBezier, _default as default, drawOutput, frames, loadSheet, readStyle, renderFrames, saveSheet, sceneSheet, sceneTransition, signalOutput, spring, stagger, styleTrack, validateSheet, writeStyle };

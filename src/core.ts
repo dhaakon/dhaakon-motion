@@ -10,6 +10,7 @@ import { Track } from './track';
 export type TweenState = 'idle' | 'delayed' | 'running' | 'paused' | 'finished' | 'cancelled';
 export interface PropertyRange { start: number; end: number; unit?: string; }
 export interface TweenOptions<T extends MotionValueShape = number> {
+  name?: string;
   from?: T; to?: T; curve?: [T, T] | Line; properties?: Record<string, PropertyRange>; node?: HTMLElement | null;
   duration?: number; delay?: number; repeat?: number; repeatDelay?: number; yoyo?: boolean; direction?: Direction;
   easing?: EasingInput | EasingName; ease?: EasingInput | EasingName; autoplay?: boolean;

@@ -1564,6 +1564,317 @@ function signalOutput(send, options = {}) {
   };
 }
 
+// src/sheet.ts
+var targetKeys = /* @__PURE__ */ new WeakMap();
+function resolveEasingWithBindings(input, easings) {
+  if (input == null) return void 0;
+  if (typeof input === "string" && easings?.[input]) return easings[input];
+  return resolveEasing(input);
+}
+function resolveTarget(key, bindings, strict, path) {
+  if (key == null) return void 0;
+  const target = bindings.targets?.[key];
+  if (target == null) {
+    const message = `${path}: unknown target "${key}"`;
+    if (strict) throw new Error(message);
+    console.warn(`loadSheet: ${message}; skipping the write.`);
+    return void 0;
+  }
+  return target instanceof MotionValue ? (value) => target.set(value) : target;
+}
+function buildItem(item, bindings, strict, path, rate) {
+  if (item.type === "tween") {
+    const tween_ = item;
+    const write = resolveTarget(tween_.target, bindings, strict, path);
+    const tween = new Tween({
+      name: tween_.name,
+      from: tween_.from,
+      to: tween_.to,
+      duration: tween_.duration != null ? parseTime(tween_.duration, rate) : void 0,
+      delay: tween_.delay != null ? parseTime(tween_.delay, rate) : void 0,
+      repeat: tween_.repeat,
+      repeatDelay: tween_.repeatDelay != null ? parseTime(tween_.repeatDelay, rate) : void 0,
+      yoyo: tween_.yoyo,
+      easing: resolveEasingWithBindings(tween_.easing, bindings.easings),
+      onUpdate: write ? (value) => write(value) : void 0
+    });
+    if (tween_.target) targetKeys.set(tween, tween_.target);
+    return tween;
+  }
+  if (item.type === "track") {
+    const track_ = item;
+    const write = resolveTarget(track_.target, bindings, strict, path);
+    const track2 = new Track({
+      name: track_.name,
+      frameRate: rate,
+      keyframes: track_.keyframes.map((k) => ({ at: k.at, value: k.value, easing: k.easing })),
+      repeat: track_.repeat,
+      repeatDelay: track_.repeatDelay != null ? parseTime(track_.repeatDelay, rate) : void 0,
+      direction: track_.direction === "alternate" ? "alternate" : "normal",
+      easing: resolveEasingWithBindings(track_.easing, bindings.easings),
+      apply: write ?? (() => {
+      })
+    });
+    if (track_.target) targetKeys.set(track2, track_.target);
+    return track2;
+  }
+  if (item.type === "timeline") {
+    return buildTimeline(item, bindings, strict, path, rate);
+  }
+  const built = bindings.createItem?.(item, { bindings, strict });
+  if (built) return built;
+  const message = `${path}: unknown item type "${item.type}"`;
+  if (strict) throw new Error(message);
+  console.warn(`loadSheet: ${message}; skipping it. Pass bindings.createItem to handle it.`);
+  return void 0;
+}
+function applyMarkersCuesRegions(timeline, sheet, bindings) {
+  for (const marker of sheet.markers ?? []) timeline.marker(marker.name, marker.at, { color: marker.color, payload: marker.payload });
+  for (const cue of sheet.cues ?? []) {
+    const handler = bindings.cues?.[cue.name] ?? (() => {
+    });
+    const options = { payload: cue.payload, once: cue.once };
+    timeline.cue(cue.name, cue.at, handler, options);
+  }
+  for (const region of sheet.regions ?? []) {
+    timeline.region(region.name, region.from, region.to, {
+      payload: region.payload,
+      once: region.once,
+      onEnter: bindings.cues?.[`${region.name}:enter`],
+      onExit: bindings.cues?.[`${region.name}:exit`]
+    });
+  }
+}
+function buildTimeline(sheet, bindings, strict, path, inheritedRate) {
+  const rate = sheet.frameRate ?? inheritedRate;
+  const options = {
+    name: sheet.name,
+    frameRate: rate,
+    repeat: sheet.repeat,
+    repeatDelay: sheet.repeatDelay != null ? parseTime(sheet.repeatDelay, rate) : void 0,
+    yoyo: sheet.direction === "alternate"
+  };
+  const timeline = new Timeline(options);
+  applyMarkersCuesRegions(timeline, sheet, bindings);
+  sheet.items.forEach((item, index) => {
+    const item_ = item;
+    const built = buildItem(item, bindings, strict, `${path}.items[${index}]`, rate);
+    if (built) timeline.add(built, item_.at);
+  });
+  return timeline;
+}
+function loadSheet(sheet, bindings = {}, options = {}) {
+  const parsed = typeof sheet === "string" ? JSON.parse(sheet) : sheet;
+  const strict = options.strict ?? true;
+  const validated = validateSheet(parsed);
+  if (!validated.ok) {
+    const message = validated.errors.map((e) => `${e.path}: ${e.message}`).join("\n");
+    throw new Error(`loadSheet: invalid cue sheet:
+${message}`);
+  }
+  return buildTimeline(parsed, bindings, strict, "$", void 0);
+}
+function saveSheet(timeline) {
+  return {
+    $schema: "dhaakon-motion/cue-sheet/1",
+    ...timeline.name ? { name: timeline.name } : {},
+    frameRate: timeline.frameRate,
+    ...timeline.options.repeat ? { repeat: timeline.options.repeat } : {},
+    ...timeline.options.repeatDelay ? { repeatDelay: timeline.options.repeatDelay } : {},
+    ...timeline.options.yoyo ? { direction: "alternate" } : {},
+    ...timeline.markers.length ? { markers: timeline.markers.map((m) => ({ name: m.name, at: m.time, ...m.color ? { color: m.color } : {}, ...m.payload !== void 0 ? { payload: m.payload } : {} })) } : {},
+    ...timeline.cues.length ? { cues: timeline.cues.map((c) => ({ name: c.name, at: c.time })) } : {},
+    items: timeline.items.map(({ item, start }) => saveItem(item, start))
+  };
+}
+function saveItem(item, at) {
+  const target = targetKeys.get(item);
+  if (item instanceof Timeline) {
+    return {
+      type: "timeline",
+      ...item.name ? { name: item.name } : {},
+      at,
+      frameRate: item.frameRate,
+      ...item.options.repeat ? { repeat: item.options.repeat } : {},
+      ...item.options.yoyo ? { direction: "alternate" } : {},
+      ...item.markers.length ? { markers: item.markers.map((m) => ({ name: m.name, at: m.time })) } : {},
+      ...item.cues.length ? { cues: item.cues.map((c) => ({ name: c.name, at: c.time })) } : {},
+      items: item.items.map((entry) => saveItem(entry.item, entry.start))
+    };
+  }
+  if (item instanceof Tween) {
+    return {
+      type: "tween",
+      ...item.name ? { name: item.name } : {},
+      at,
+      ...target ? { target } : {},
+      from: item.from,
+      to: item.toValue,
+      duration: item.duration,
+      ...item.delay ? { delay: item.delay } : {},
+      ...item.repeat ? { repeat: item.repeat } : {},
+      ...item.repeatDelay ? { repeatDelay: item.repeatDelay } : {},
+      ...item.direction === "alternate" ? { yoyo: true } : {},
+      ...serializeEasing(item.easing) !== void 0 ? { easing: serializeEasing(item.easing) } : {}
+    };
+  }
+  if (item instanceof Track) {
+    return {
+      type: "track",
+      ...item.name ? { name: item.name } : {},
+      at,
+      ...target ? { target } : {},
+      keyframes: item.keyframes.map((k) => ({ at: k.at, value: k.value }))
+    };
+  }
+  return { type: item.kind, ...item.name ? { name: item.name } : {}, at };
+}
+function validateSheet(input) {
+  const errors = [];
+  const push = (path, message) => errors.push({ path, message });
+  if (typeof input !== "object" || input === null) {
+    push("$", "must be an object");
+    return { ok: false, errors };
+  }
+  const sheet = input;
+  if (sheet.$schema !== "dhaakon-motion/cue-sheet/1") push("$.$schema", 'must be "dhaakon-motion/cue-sheet/1"');
+  if (sheet.frameRate != null) {
+    try {
+      frameRate(sheet.frameRate);
+    } catch (err) {
+      push("$.frameRate", err.message);
+    }
+  }
+  if (!Array.isArray(sheet.items)) push("$.items", "must be an array");
+  else sheet.items.forEach((item, index) => validateItem(item, `$.items[${index}]`, push));
+  for (const label of ["markers", "cues"]) {
+    const list = sheet[label];
+    if (list != null && !Array.isArray(list)) push(`$.${label}`, "must be an array");
+  }
+  return errors.length ? { ok: false, errors } : { ok: true, sheet };
+}
+function validateEasing(value, path, push) {
+  if (value == null) return;
+  try {
+    resolveEasing(value);
+  } catch (err) {
+    push(path, err.message);
+  }
+}
+function validateItem(item, path, push) {
+  if (typeof item !== "object" || item === null) {
+    push(path, "must be an object");
+    return;
+  }
+  const value = item;
+  if (typeof value.type !== "string") {
+    push(`${path}.type`, "is required");
+    return;
+  }
+  if (value.type === "tween") {
+    if (value.from === void 0) push(`${path}.from`, "is required");
+    if (value.to === void 0) push(`${path}.to`, "is required");
+    validateEasing(value.easing, `${path}.easing`, push);
+  } else if (value.type === "track") {
+    if (!Array.isArray(value.keyframes) || value.keyframes.length === 0) push(`${path}.keyframes`, "must be a non-empty array");
+    else {
+      let lastNumeric;
+      value.keyframes.forEach((keyframe, index) => {
+        if (typeof keyframe !== "object" || keyframe === null) {
+          push(`${path}.keyframes[${index}]`, "must be an object");
+          return;
+        }
+        const kf = keyframe;
+        if (kf.at === void 0) push(`${path}.keyframes[${index}].at`, "is required");
+        if (kf.value === void 0) push(`${path}.keyframes[${index}].value`, "is required");
+        validateEasing(kf.easing, `${path}.keyframes[${index}].easing`, push);
+        if (typeof kf.at === "number") {
+          if (lastNumeric != null && kf.at < lastNumeric) push(`${path}.keyframes[${index}].at`, "keyframes must be in non-decreasing time order");
+          lastNumeric = kf.at;
+        }
+      });
+    }
+    validateEasing(value.easing, `${path}.easing`, push);
+  } else if (value.type === "timeline") {
+    if (value.frameRate != null) {
+      try {
+        frameRate(value.frameRate);
+      } catch (err) {
+        push(`${path}.frameRate`, err.message);
+      }
+    }
+    if (!Array.isArray(value.items)) push(`${path}.items`, "must be an array");
+    else value.items.forEach((child, index) => validateItem(child, `${path}.items[${index}]`, push));
+  }
+}
+function writerFor(target) {
+  return target instanceof MotionValue ? (value) => target.set(value) : target;
+}
+function captureScene(targets) {
+  const state = {};
+  for (const [key, target] of Object.entries(targets ?? {})) if (target instanceof MotionValue) state[key] = target.get();
+  return state;
+}
+function applyScene(state, targets, options = {}) {
+  const entries = Object.entries(state).filter(([key]) => targets?.[key] != null);
+  if (!options.transition) {
+    for (const [key, value] of entries) writerFor(targets[key])(value);
+    return;
+  }
+  const { stagger: stagger2, ...transitionOptions } = options.transition;
+  const timeline = new Timeline();
+  entries.forEach(([key, value], index) => {
+    const target = targets[key];
+    const from = target instanceof MotionValue ? target.get() : value;
+    const staggerDelay = typeof stagger2 === "function" ? stagger2(key, index) : (stagger2 ?? 0) * index;
+    timeline.add(new Tween({
+      ...transitionOptions,
+      from,
+      to: value,
+      delay: (transitionOptions.delay ?? 0) + staggerDelay,
+      onUpdate: (value2) => writerFor(target)(value2)
+    }), 0);
+  });
+  timeline.play();
+  return timeline;
+}
+function sceneTransition(from, to, targets, options = {}) {
+  const timeline = new Timeline();
+  const keys = [.../* @__PURE__ */ new Set([...Object.keys(from), ...Object.keys(to)])];
+  keys.forEach((key, index) => {
+    const target = targets?.[key];
+    if (!target) return;
+    const staggerDelay = typeof options.stagger === "function" ? options.stagger(key, index) : (options.stagger ?? 0) * index;
+    timeline.add(new Tween({
+      from: from[key] ?? to[key],
+      to: to[key] ?? from[key],
+      duration: options.duration != null ? parseTime(options.duration) : void 0,
+      delay: (options.delay != null ? parseTime(options.delay) : 0) + staggerDelay,
+      easing: options.easing != null ? resolveEasing(options.easing) : void 0,
+      onUpdate: (value) => writerFor(target)(value)
+    }), 0);
+  });
+  return timeline;
+}
+function sceneSheet(states, order, options = {}) {
+  const holdMs = options.hold != null ? parseTime(options.hold) : 1e3;
+  const transitionMs = options.transition != null ? parseTime(options.transition) : 500;
+  const stepMs = holdMs + transitionMs;
+  const keys = /* @__PURE__ */ new Set();
+  for (const name of order) for (const key of Object.keys(states[name] ?? {})) keys.add(key);
+  const items = [];
+  for (const key of keys) {
+    const keyframes = [];
+    order.forEach((name, index) => {
+      const state = states[name];
+      if (state && key in state) keyframes.push({ at: index * stepMs, value: state[key], easing: options.easing });
+    });
+    if (keyframes.length) items.push({ type: "track", target: key, keyframes });
+  }
+  const markers = order.map((name, index) => ({ name, at: index * stepMs }));
+  return { $schema: "dhaakon-motion/cue-sheet/1", markers, items };
+}
+
 // src/index.ts
 var src_default = { Tween, Timeline, Transport, Track, Line, MotionValue, animate, stagger, Easing, cubicBezier, spring };
 export {
@@ -1580,6 +1891,8 @@ export {
   activeDuration,
   addFrames,
   animate,
+  applyScene,
+  captureScene,
   createTrace,
   cubicBezier,
   src_default as default,
@@ -1592,6 +1905,7 @@ export {
   frames,
   framesToTimecode,
   interpolate,
+  loadSheet,
   mix,
   msToFrame,
   msToTimecode,
@@ -1602,6 +1916,9 @@ export {
   renderFrames,
   resolveEasing,
   sampleCycle,
+  saveSheet,
+  sceneSheet,
+  sceneTransition,
   scheduler,
   serializeEasing,
   signalOutput,
@@ -1614,6 +1931,7 @@ export {
   timecodeToMs,
   totalDuration,
   track,
+  validateSheet,
   writeStyle
 };
 //# sourceMappingURL=index.js.map

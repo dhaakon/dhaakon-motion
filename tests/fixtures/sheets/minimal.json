@@ -1,0 +1,19 @@
+{
+  "$schema": "dhaakon-motion/cue-sheet/1",
+  "name": "minimal",
+  "frameRate": 24,
+  "markers": [{ "name": "verse", "at": "1s" }],
+  "cues": [{ "name": "blackout", "at": "verse+=12f", "payload": { "signal": { "type": "dmx", "channel": 1, "value": 0 } } }],
+  "items": [
+    {
+      "type": "tween",
+      "name": "camera",
+      "target": "camera",
+      "at": 0,
+      "duration": "12f",
+      "easing": "dhaakon",
+      "from": { "position": [0.4, 1.2, 8.8], "fov": 44 },
+      "to": { "position": [-4.2, 2.55, 5.8], "fov": 31 }
+    }
+  ]
+}

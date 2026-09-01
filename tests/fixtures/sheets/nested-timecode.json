@@ -1,0 +1,36 @@
+{
+  "$schema": "dhaakon-motion/cue-sheet/1",
+  "name": "show",
+  "frameRate": "29.97df",
+  "markers": [{ "name": "verse", "at": "00:00:02:00" }],
+  "items": [
+    {
+      "type": "tween",
+      "name": "fade",
+      "target": "opacity",
+      "at": 0,
+      "duration": "00:00:01:00",
+      "easing": "linear",
+      "from": 0,
+      "to": 1
+    },
+    {
+      "type": "timeline",
+      "name": "intro",
+      "at": "verse",
+      "repeat": 1,
+      "direction": "alternate",
+      "items": [
+        {
+          "type": "track",
+          "name": "title",
+          "target": "title",
+          "keyframes": [
+            { "at": 0, "value": 0 },
+            { "at": "00:00:00:12", "value": 1, "easing": "linear" }
+          ]
+        }
+      ]
+    }
+  ]
+}
