@@ -8,5 +8,5 @@ import { App } from './App';
 declare const __MOTION_VERSION__: string;
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><DhaakonProvider><App version={__MOTION_VERSION__} /></DhaakonProvider></StrictMode>,
+  <StrictMode><DhaakonProvider theme="light"><App version={__MOTION_VERSION__} /></DhaakonProvider></StrictMode>,
 );
