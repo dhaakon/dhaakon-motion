@@ -1,0 +1,16 @@
+{
+  "name": "@dhaakon/motion",
+  "version": "0.1.0",
+  "description": "Small, dependency-free tween and timeline primitives for Dhaakon interfaces.",
+  "type": "module",
+  "license": "MIT",
+  "files": ["dist", "README.md"],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs" }
+  },
+  "publishConfig": { "registry": "http://dhaakon-ubuntu:21760/" },
+  "scripts": { "test": "node --test", "build": "cp src/index.js dist/index.js && cp src/index.cjs dist/index.cjs" }
+}
