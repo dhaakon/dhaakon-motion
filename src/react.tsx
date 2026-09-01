@@ -1,4 +1,4 @@
-import React, { createContext, forwardRef, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import React, { createContext, forwardRef, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { MotionValue, Timeline, Tween, type TweenOptions, type EasingFunction, type EasingName, type MotionValueShape } from '@dhaakon/motion';
 
 export interface MotionTransition { duration?: number; delay?: number; repeat?: number; repeatDelay?: number; yoyo?: boolean; easing?: EasingFunction | EasingName; }
@@ -18,6 +18,30 @@ export function useReducedMotion() {
     () => query?.matches ?? false, () => false,
   );
   return setting === 'always' || (setting !== 'never' && system);
+}
+
+export interface InViewOptions {
+  once?: boolean;
+  amount?: number | 'some' | 'all';
+  margin?: string;
+  disabled?: boolean;
+}
+
+export function useInView<T extends Element = HTMLElement>({ once = true, amount = 'some', margin = '0px', disabled = false }: InViewOptions = {}) {
+  const ref = useRef<T | null>(null); const reduced = useReducedMotion();
+  const [inView, setInView] = useState(disabled || reduced);
+  useEffect(() => {
+    if (disabled || reduced || typeof IntersectionObserver === 'undefined') { setInView(true); return; }
+    const threshold = amount === 'all' ? 1 : amount === 'some' ? 0.15 : Math.max(0, Math.min(1, amount));
+    const observer = new IntersectionObserver(([entry]) => {
+      const visible = entry.isIntersecting && entry.intersectionRatio >= threshold;
+      if (visible) { setInView(true); if (once) observer.disconnect(); }
+      else if (!once) setInView(false);
+    }, { rootMargin: margin, threshold });
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [once, amount, margin, disabled, reduced]);
+  return [ref, inView] as const;
 }
 
 export function useMotionValue<T extends MotionValueShape>(initial: T) {
@@ -60,6 +84,7 @@ export type MotionStyle = Record<string, number | string>;
 type NativeProps<T extends React.ElementType> = Omit<React.ComponentPropsWithoutRef<T>, 'style'>;
 export type MotionElementProps<T extends React.ElementType> = NativeProps<T> & {
   initial?: MotionStyle | false; animate?: MotionStyle; transition?: MotionTransition; style?: React.CSSProperties;
+  whileInView?: MotionStyle; viewport?: InViewOptions;
   onMotionStart?: () => void; onMotionComplete?: () => void; as?: React.ElementType;
 };
 
@@ -82,20 +107,24 @@ function writeStyle(node: HTMLElement, values: MotionStyle) {
 
 export function createMotionComponent<T extends React.ElementType>(tag: T) {
   const Component = forwardRef<HTMLElement, MotionElementProps<any>>(function DhaakonMotionElement(rawProps, forwardedRef) {
-    const { as, initial, animate: target, transition, style, onMotionStart, onMotionComplete, ...props } = rawProps as MotionElementProps<T>;
+    const { as, initial, animate: target, whileInView, viewport, transition, style, onMotionStart, onMotionComplete, ...props } = rawProps as MotionElementProps<T>;
     const localRef = useRef<HTMLElement | null>(null); const config = useContext(MotionContext); const reduced = useReducedMotion();
+    const [inViewRef, inView] = useInView<HTMLElement>({ ...viewport, disabled: !whileInView });
+    const hasAnimated = useRef(false);
     useImperativeHandle(forwardedRef, () => localRef.current as HTMLElement);
-    const initialKey = stableKey(initial); const targetKey = stableKey(target);
+    const initialKey = stableKey(initial); const targetKey = stableKey(target); const viewKey = stableKey(whileInView);
     useLayoutEffect(() => { if (localRef.current && initial) writeStyle(localRef.current, initial); }, [initialKey]);
     useEffect(() => {
-      const node = localRef.current; if (!node || !target) return;
-      const from = initial === false ? readStyle(node, target) : { ...(initial || readStyle(node, target)) };
-      if (reduced) { writeStyle(node, target); onMotionComplete?.(); return; }
-      const tween = new Tween<MotionStyle>({ ...config.transition, ...transition, from, to: target,
+      const node = localRef.current; const activeTarget = whileInView ? (inView ? whileInView : (initial || undefined)) : target;
+      if (!node || !activeTarget) return;
+      const from = hasAnimated.current || initial === false ? readStyle(node, activeTarget) : { ...(initial || readStyle(node, activeTarget)) };
+      hasAnimated.current = true;
+      if (reduced) { writeStyle(node, activeTarget); onMotionComplete?.(); return; }
+      const tween = new Tween<MotionStyle>({ ...config.transition, ...transition, from, to: activeTarget,
         onStart: () => onMotionStart?.(), onUpdate: (value) => writeStyle(node, value), onComplete: () => onMotionComplete?.() }).play();
       return () => { tween.cancel(); };
-    }, [initialKey, targetKey, reduced, transition?.duration, transition?.delay, transition?.repeat, transition?.repeatDelay, transition?.yoyo, transition?.easing]);
-    return React.createElement(as || tag, { ...props, style, ref: localRef });
+    }, [initialKey, targetKey, viewKey, inView, reduced, transition?.duration, transition?.delay, transition?.repeat, transition?.repeatDelay, transition?.yoyo, transition?.easing]);
+    return React.createElement(as || tag, { ...props, style, ref: (node: HTMLElement | null) => { localRef.current = node; inViewRef.current = node; } });
   });
   return Component as React.ForwardRefExoticComponent<MotionElementProps<T> & React.RefAttributes<HTMLElement>>;
 }
@@ -120,3 +149,10 @@ type MotionFactory = {
 };
 const cache = new Map<string, React.ComponentType<any>>();
 export const motion = new Proxy({} as MotionFactory, { get: (_, tag: string) => { if (!cache.has(tag)) cache.set(tag, createMotionComponent(tag as React.ElementType)); return cache.get(tag); } });
+
+export interface RevealProps extends Omit<MotionElementProps<'div'>, 'initial' | 'animate' | 'whileInView' | 'viewport'> {
+  from?: MotionStyle; to?: MotionStyle; once?: boolean; amount?: InViewOptions['amount']; margin?: string;
+}
+export function Reveal({ from = { y: 28, opacity: 0 }, to = { y: 0, opacity: 1 }, once = true, amount = 'some', margin = '0px 0px -8% 0px', ...props }: RevealProps) {
+  return <motion.div {...props} initial={from} whileInView={to} viewport={{ once, amount, margin }} />;
+}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Badge, Button } from '@dhaakon/ui';
 import { Easing, MotionValue, Timeline, Tween, interpolate, scheduler } from '@dhaakon/motion';
-import { Motion, MotionConfig, motion, useMotionValue, useMotionValueState } from '@dhaakon/motion/react';
+import { Motion, MotionConfig, Reveal, motion, useMotionValue, useMotionValueState } from '@dhaakon/motion/react';
 
 const tweenCode = `import { Tween, Easing } from '@dhaakon/motion';
 
@@ -31,6 +31,18 @@ const timelineCode = `const sequence = new Timeline()
   .add(actionTween, 'entrance+=160');
 
 sequence.play();`;
+
+const revealCode = `import { Reveal } from '@dhaakon/motion/react';
+
+<Reveal
+  as="section"
+  from={{ y: 36, opacity: 0 }}
+  to={{ y: 0, opacity: 1 }}
+  amount={0.2}
+  once
+>
+  <CourseModule />
+</Reveal>`;
 
 function Code({ children }: { children: string }) {
   const [copied, setCopied] = useState(false);
@@ -108,10 +120,10 @@ export function App({ version }: { version: string }) {
     <main id="top">
       <section className="hero"><div className="hero-copy"><p className="eyebrow">[ MOTION SYSTEM 02 ] · BUILT FROM DHAAK-ANIM</p><h1>Movement with<br/><em>direction.</em></h1><p className="lead">A compact tween engine for interfaces, timelines, canvas, and React compositions. One frame loop. Zero core dependencies.</p><div className="install"><code>npm i @dhaakon/motion</code><span>↗ VERDACCIO :21760</span></div></div><HeroOrbit /></section>
       <section className="metrics"><div><strong>1</strong><span>shared frame loop</span></div><div><strong>0</strong><span>core dependencies</span></div><div><strong>2</strong><span>entry points</span></div><div><strong>{scheduler.size}</strong><span>active right now</span></div></section>
-      <section className="section" id="playground"><SectionTitle number="01" title="Core playground" subtitle="The old syntax remains familiar; the clock underneath is entirely new."/><div className="demo-grid"><TweenPlayground/><EasingTracks/><TimelinePlayground/><MotionValueDemo/></div></section>
-      <section className="section inverse" id="react"><SectionTitle number="02" title="React, composed" subtitle="Declarative when it helps. Imperative at the frame boundary."/><div className="demo-grid"><ReactComposition/><RenderPropDemo/></div><div className="code-grid"><div><h3>DOM composition</h3><p>Use <code>motion.*</code> for transform and style animation without a React render on every frame.</p><Code>{reactCode}</Code></div><div><h3>Values as children</h3><p><code>Motion</code>, <code>useTween</code>, and <code>useMotionValue</code> cover render props and non-DOM targets.</p><Code>{`<Motion from={0} to={100}>\n  {value => <Gauge value={value} />}\n</Motion>`}</Code></div></div></section>
-      <section className="section" id="api"><SectionTitle number="03" title="Small surface, deep control" subtitle="Every primitive can be used alone or nested into a composition."/><div className="api-grid"><Api name="Tween" text="Play, pause, stop, cancel, reverse, seek, repeat, yoyo, delay, and await finished."/><Api name="Timeline" text="Sequence or overlap tweens with milliseconds, labels, <, >, and relative offsets."/><Api name="MotionValue" text="Observable animation state for React, canvas, WebGL, audio, and custom renderers."/><Api name="motion.*" text="Typed React elements with initial, animate, transition, and reduced-motion handling."/><Api name="interpolate" text="Numbers, unit strings, colors, arrays, and deeply nested objects."/><Api name="FrameScheduler" text="One requestAnimationFrame for every active tween; injectable for deterministic tests."/></div><div className="code-grid"><Code>{tweenCode}</Code><Code>{timelineCode}</Code></div></section>
-      <section className="principles"><p className="eyebrow">[ OPERATING PRINCIPLES ]</p><div><h2>Motion clarifies state.</h2><h2>Composition beats choreography.</h2><h2>Reduced motion is a first-class mode.</h2></div></section>
+      <Reveal as="section" className="section" id="playground" amount={0.12}><SectionTitle number="01" title="Core playground" subtitle="The old syntax remains familiar; the clock underneath is entirely new."/><div className="demo-grid"><TweenPlayground/><EasingTracks/><TimelinePlayground/><MotionValueDemo/></div></Reveal>
+      <Reveal as="section" className="section inverse" id="react" amount={0.08}><SectionTitle number="02" title="React, composed" subtitle="Declarative when it helps. Imperative at the frame boundary."/><div className="demo-grid"><ReactComposition/><RenderPropDemo/></div><div className="code-grid"><div><h3>DOM composition</h3><p>Use <code>motion.*</code> for transform and style animation without a React render on every frame.</p><Code>{reactCode}</Code></div><div><h3>Reveal on scroll</h3><p><code>Reveal</code>, <code>whileInView</code>, and <code>useInView</code> share the same observer and respect reduced-motion preferences.</p><Code>{revealCode}</Code></div></div></Reveal>
+      <Reveal as="section" className="section" id="api" amount={0.08}><SectionTitle number="03" title="Small surface, deep control" subtitle="Every primitive can be used alone or nested into a composition."/><div className="api-grid"><Api name="Tween" text="Play, pause, stop, cancel, reverse, seek, repeat, yoyo, delay, and await finished."/><Api name="Timeline" text="Sequence or overlap tweens with milliseconds, labels, <, >, and relative offsets."/><Api name="MotionValue" text="Observable animation state for React, canvas, WebGL, audio, and custom renderers."/><Api name="motion.*" text="Typed React elements with animate, whileInView, viewport, and reduced-motion handling."/><Api name="interpolate" text="Numbers, unit strings, colors, arrays, and deeply nested objects."/><Api name="FrameScheduler" text="One requestAnimationFrame for every active tween; injectable for deterministic tests."/></div><div className="code-grid"><Code>{tweenCode}</Code><Code>{timelineCode}</Code></div></Reveal>
+      <Reveal as="section" className="principles" amount={0.2}><p className="eyebrow">[ OPERATING PRINCIPLES ]</p><div><h2>Motion clarifies state.</h2><h2>Composition beats choreography.</h2><h2>Reduced motion is a first-class mode.</h2></div></Reveal>
     </main>
     <footer><span>◇ DHAAKON MOTION</span><span>MIT · TYPESCRIPT · REACT 18/19</span><a href="http://dhaakon-ubuntu:21724/dhaakon-ubuntu/dhaakon-motion">SOURCE ↗</a></footer>
   </MotionConfig>;

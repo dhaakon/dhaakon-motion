@@ -76,6 +76,8 @@ import { MotionConfig, motion } from '@dhaakon/motion/react';
 The React entry point exports:
 
 - `motion.*` — DOM animation without rerendering the React tree every frame
+- `Reveal` / `whileInView` — animate when an element crosses a configurable viewport threshold
+- `useInView` — IntersectionObserver state for custom reveal compositions
 - `Motion` — render-prop animation for SVG, canvas, and component props
 - `useTween` — animated state plus controls
 - `useMotionValue` / `useMotionValueState` — external observable values
@@ -83,6 +85,14 @@ The React entry point exports:
 - `MotionConfig` / `useReducedMotion` — shared transitions and accessible motion policy
 
 React 18 and 19 are optional peer dependencies. Importing the core never loads React.
+
+```tsx
+<Reveal as="section" from={{ y: 36, opacity: 0 }} amount={0.2} once>
+  <CourseModule />
+</Reveal>
+```
+
+Reveal observers disconnect after the first entrance by default, and resolve immediately when reduced motion is requested. Use `once={false}` when a composition should respond each time it crosses the viewport.
 
 ## Development
 
