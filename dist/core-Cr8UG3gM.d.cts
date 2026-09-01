@@ -22,6 +22,51 @@ declare const Easing: {
 type EasingName = keyof typeof Easing;
 declare function resolveEasing(easing?: EasingFunction | EasingName): EasingFunction;
 
+/** A rational frame rate: `num / den` frames per second, with an optional SMPTE drop-frame flag. */
+interface FrameRate {
+    readonly num: number;
+    readonly den: number;
+    readonly dropFrame: boolean;
+    readonly fps: number;
+    readonly label: string;
+}
+type FrameRateInput = number | string | FrameRate | {
+    num: number;
+    den?: number;
+    dropFrame?: boolean;
+};
+/** Named presets for the common broadcast and film frame rates. */
+declare const FrameRates: {
+    readonly '23.976': FrameRate;
+    readonly '24': FrameRate;
+    readonly '25': FrameRate;
+    readonly '29.97': FrameRate;
+    readonly '29.97df': FrameRate;
+    readonly '30': FrameRate;
+    readonly '50': FrameRate;
+    readonly '59.94': FrameRate;
+    readonly '59.94df': FrameRate;
+    readonly '60': FrameRate;
+};
+/** Normalize a frame rate input (a plain number, a preset string like `'29.97df'`, or an explicit `{num, den}`) into a `FrameRate`. */
+declare function frameRate(input: FrameRateInput): FrameRate;
+/** Convert a frame index into milliseconds at a given rate. */
+declare function frameToMs(frame: number, rate: FrameRate): number;
+/** Convert milliseconds into the frame index that contains that instant (floor, with a small epsilon to absorb float error). */
+declare function msToFrame(ms: number, rate: FrameRate): number;
+/** Quantize milliseconds down to the start of its containing frame. */
+declare function snapToFrame(ms: number, rate: FrameRate): number;
+/**
+ * A time value as authored: plain milliseconds, or a string with a unit —
+ * `'12f'` (frames, needs a rate), `'1.5s'` (seconds), `'500ms'`, or a SMPTE
+ * timecode (`'HH:MM:SS:FF'` / `'HH:MM:SS;FF'`, needs a rate).
+ */
+type TimeInput = number | string;
+/** Resolve any `TimeInput` form into milliseconds. Frame and timecode forms require `rate`. */
+declare function parseTime(input: TimeInput, rate?: FrameRateInput): number;
+/** Format milliseconds for display. `'frames'` and `'timecode'` styles require `rate`. */
+declare function formatTime(ms: number, rate?: FrameRateInput, style?: 'ms' | 'seconds' | 'frames' | 'timecode'): string;
+
 type MotionPrimitive = number | string;
 type MotionValueShape = MotionPrimitive | MotionPrimitive[] | {
     [key: string]: MotionValueShape;
@@ -101,6 +146,28 @@ interface RenderContext {
 }
 declare const defaultRenderContext: RenderContext;
 
+interface Timecode {
+    hours: number;
+    minutes: number;
+    seconds: number;
+    frames: number;
+    dropFrame: boolean;
+}
+/** Parse `'HH:MM:SS:FF'` (`;` before FF marks drop-frame) and validate it against `rate`. */
+declare function parseTimecode(text: string, rate: FrameRate): Timecode;
+/** Convert a timecode into an absolute frame index, applying the SMPTE drop-frame correction when `rate.dropFrame` is set. */
+declare function timecodeToFrames(tc: Timecode, rate: FrameRate): number;
+/** Convert an absolute frame index into a timecode, applying the SMPTE drop-frame correction when `rate.dropFrame` is set. */
+declare function framesToTimecode(frame: number, rate: FrameRate): Timecode;
+/** Format a `Timecode` as `'HH:MM:SS:FF'`, or `'HH:MM:SS;FF'` when it is drop-frame. */
+declare function formatTimecode(tc: Timecode): string;
+/** Convert milliseconds into a `Timecode` at `rate`. */
+declare function msToTimecode(ms: number, rate: FrameRate): Timecode;
+/** Convert a timecode (string or parsed `Timecode`) into milliseconds at `rate`. */
+declare function timecodeToMs(input: string | Timecode, rate: FrameRate): number;
+/** Add (or subtract, with a negative count) a number of frames to a timecode. */
+declare function addFrames(tc: Timecode, frames: number, rate: FrameRate): Timecode;
+
 type TweenState = 'idle' | 'delayed' | 'running' | 'paused' | 'finished' | 'cancelled';
 interface PropertyRange {
     start: number;
@@ -175,6 +242,10 @@ declare class Tween<T extends MotionValueShape = number> implements TimelineItem
     seek(progress: number): this;
     seekTime(milliseconds: number): this;
     setDuration(duration: number): this;
+    /** The frame index the tween's active time falls in, at `rate` (default 60 fps). Floor-based: matches which frame is on screen. */
+    frameAt(rate?: FrameRateInput): number;
+    /** The SMPTE timecode for the tween's active time, at `rate`. */
+    timecodeAt(rate: FrameRateInput): Timecode;
     getCurrentFrame(fps?: number): number;
     get activeDuration(): number;
     get totalDuration(): number;
@@ -189,6 +260,10 @@ interface TimelineOptions {
     onUpdate?: (time: number, progress: number) => void;
     onComplete?: () => void;
     scheduler?: FrameScheduler;
+    /** Frame rate used to resolve frame ('12f') and timecode positions, and by `.frames`/`.timecode()`. Defaults to 60 fps. */
+    frameRate?: FrameRateInput;
+    /** Quantize every rendered time to a frame boundary before sampling children. */
+    snap?: boolean;
 }
 type TimelinePosition = number | '<' | '>' | string;
 declare class Timeline {
@@ -197,11 +272,16 @@ declare class Timeline {
     private cursor;
     private driver;
     readonly options: TimelineOptions;
+    private readonly rateInput?;
     constructor(options?: TimelineOptions);
     get duration(): number;
     get state(): TweenState;
     get finished(): Promise<Tween<number>>;
-    label(name: string, at?: number): this;
+    /** The timeline's own frame rate (default 60 fps), used for `.frames`, `.timecode()`, `snap`, and frame/timecode positions. */
+    get frameRate(): FrameRate;
+    get frames(): number;
+    timecode(ms?: number): Timecode;
+    label(name: string, at?: TimelinePosition): this;
     add<T extends MotionValueShape>(tween: Tween<T>, at?: TimelinePosition): this;
     addTween<T extends MotionValueShape>(tween: Tween<T>, at?: TimelinePosition): this;
     addTweens(tweens: Tween<MotionValueShape>[]): this;
@@ -231,4 +311,4 @@ declare function stagger(interval?: number, { start }?: {
     start?: number | undefined;
 }): (index: number) => number;
 
-export { type CycleSample as C, type Direction as D, type EasingFunction as E, type FrameDriver as F, Line as L, MotionValue as M, type PropertyRange as P, type RenderContext as R, Tween as T, Timeline as a, animate as b, cubicBezier as c, spring as d, type CycleSpec as e, Easing as f, type EasingName as g, FrameScheduler as h, type FrameTask as i, type MotionPrimitive as j, type MotionValueShape as k, type TimelineItem as l, type TimelineOptions as m, type TweenOptions as n, type TweenState as o, activeDuration as p, defaultRenderContext as q, interpolate as r, stagger as s, mix as t, resolveEasing as u, sampleCycle as v, scheduler as w, totalDuration as x };
+export { formatTimecode as A, frameRate as B, type CycleSample as C, type Direction as D, type EasingFunction as E, type FrameDriver as F, frameToMs as G, framesToTimecode as H, interpolate as I, mix as J, msToFrame as K, Line as L, MotionValue as M, msToTimecode as N, parseTime as O, type PropertyRange as P, parseTimecode as Q, type RenderContext as R, resolveEasing as S, Tween as T, sampleCycle as U, scheduler as V, snapToFrame as W, timecodeToFrames as X, timecodeToMs as Y, totalDuration as Z, Timeline as a, animate as b, cubicBezier as c, spring as d, type CycleSpec as e, Easing as f, type EasingName as g, type FrameRate as h, type FrameRateInput as i, FrameRates as j, FrameScheduler as k, type FrameTask as l, type MotionPrimitive as m, type MotionValueShape as n, type TimeInput as o, type Timecode as p, type TimelineItem as q, type TimelineOptions as r, stagger as s, type TimelinePosition as t, type TweenOptions as u, type TweenState as v, activeDuration as w, addFrames as x, defaultRenderContext as y, formatTime as z };

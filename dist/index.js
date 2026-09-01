@@ -174,6 +174,187 @@ function sampleCycle(spec, milliseconds) {
   return { iteration, cycleTime, progress, active };
 }
 
+// src/timecode.ts
+function dropCount(fpsRounded) {
+  return fpsRounded / 15;
+}
+var TC_RE = /^(\d{1,2}):(\d{2}):(\d{2})([:;])(\d{1,2})$/;
+function parseTimecode(text, rate) {
+  const match = text.trim().match(TC_RE);
+  if (!match) throw new Error(`Invalid timecode: "${text}"`);
+  const [, h, m, s, sep, f] = match;
+  const dropFrame = sep === ";";
+  if (dropFrame && !rate.dropFrame) {
+    throw new Error(`Timecode "${text}" uses ';' (drop-frame) but the frame rate ${rate.label} is not drop-frame`);
+  }
+  const hours = Number(h);
+  const minutes = Number(m);
+  const seconds = Number(s);
+  const frames = Number(f);
+  const fpsRounded = Math.round(rate.fps);
+  if (minutes > 59 || seconds > 59) throw new Error(`Invalid timecode "${text}": minutes and seconds must be 0-59`);
+  if (frames >= fpsRounded) throw new Error(`Invalid timecode "${text}": frames must be 0-${fpsRounded - 1} at ${rate.label}`);
+  if (rate.dropFrame) {
+    const df = dropCount(fpsRounded);
+    const isDroppedInstant = minutes % 10 !== 0 && seconds === 0 && frames < df;
+    if (isDroppedInstant) {
+      throw new Error(`Invalid drop-frame timecode "${text}": frame ${frames} is dropped at the start of minute ${minutes}`);
+    }
+  }
+  return { hours, minutes, seconds, frames, dropFrame };
+}
+function timecodeToFrames(tc, rate) {
+  const fpsRounded = Math.round(rate.fps);
+  const totalMinutes = 60 * tc.hours + tc.minutes;
+  let frame = fpsRounded * 3600 * tc.hours + fpsRounded * 60 * tc.minutes + fpsRounded * tc.seconds + tc.frames;
+  if (rate.dropFrame) {
+    frame -= dropCount(fpsRounded) * (totalMinutes - Math.floor(totalMinutes / 10));
+  }
+  return frame;
+}
+function framesToTimecode(frame, rate) {
+  const fpsRounded = Math.round(rate.fps);
+  if (!rate.dropFrame) {
+    const framesPart2 = (frame % fpsRounded + fpsRounded) % fpsRounded;
+    const totalSeconds2 = Math.floor(frame / fpsRounded);
+    const secondsPart2 = (totalSeconds2 % 60 + 60) % 60;
+    const totalMinutes2 = Math.floor(totalSeconds2 / 60);
+    const minutesPart2 = (totalMinutes2 % 60 + 60) % 60;
+    const hoursPart2 = Math.floor(totalMinutes2 / 60);
+    return { hours: hoursPart2, minutes: minutesPart2, seconds: secondsPart2, frames: framesPart2, dropFrame: false };
+  }
+  const df = dropCount(fpsRounded);
+  const framesPer24Hours = fpsRounded * 3600 * 24;
+  const framesPer10Minutes = Math.round(rate.fps * 60 * 10);
+  const framesPerMinute = fpsRounded * 60 - df;
+  let f = (frame % framesPer24Hours + framesPer24Hours) % framesPer24Hours;
+  const tenMinuteBlocks = Math.floor(f / framesPer10Minutes);
+  const remainder = f % framesPer10Minutes;
+  f += remainder > df ? df * 9 * tenMinuteBlocks + df * Math.floor((remainder - df) / framesPerMinute) : df * 9 * tenMinuteBlocks;
+  const framesPart = f % fpsRounded;
+  const totalSeconds = Math.floor(f / fpsRounded);
+  const secondsPart = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutesPart = totalMinutes % 60;
+  const hoursPart = Math.floor(totalMinutes / 60);
+  return { hours: hoursPart, minutes: minutesPart, seconds: secondsPart, frames: framesPart, dropFrame: true };
+}
+function pad(n, width = 2) {
+  return String(Math.trunc(n)).padStart(width, "0");
+}
+function formatTimecode(tc) {
+  return `${pad(tc.hours)}:${pad(tc.minutes)}:${pad(tc.seconds)}${tc.dropFrame ? ";" : ":"}${pad(tc.frames)}`;
+}
+function msToTimecode(ms, rate) {
+  return framesToTimecode(msToFrame(ms, rate), rate);
+}
+function timecodeToMs(input, rate) {
+  const tc = typeof input === "string" ? parseTimecode(input, rate) : input;
+  return frameToMs(timecodeToFrames(tc, rate), rate);
+}
+function addFrames(tc, frames, rate) {
+  return framesToTimecode(timecodeToFrames(tc, rate) + frames, rate);
+}
+
+// src/time.ts
+var gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+function trimFps(fps) {
+  return String(Math.round(fps * 1e3) / 1e3);
+}
+function buildFrameRate(num, den, dropFrame) {
+  if (!Number.isFinite(num) || !Number.isFinite(den) || num <= 0 || den <= 0) {
+    throw new Error(`Invalid frame rate: ${num}/${den}`);
+  }
+  const divisor = gcd(Math.round(num), Math.round(den)) || 1;
+  const n = Math.round(num) / divisor;
+  const d = Math.round(den) / divisor;
+  if (dropFrame && !(n === 3e4 && d === 1001 || n === 6e4 && d === 1001)) {
+    throw new Error(`Drop-frame timecode is only valid at 29.97 or 59.94 fps, got ${n}/${d} (${trimFps(n / d)} fps)`);
+  }
+  const fps = n / d;
+  return { num: n, den: d, dropFrame, fps, label: dropFrame ? `${trimFps(fps)}df` : trimFps(fps) };
+}
+var NTSC_TABLE = [
+  { fps: 24e3 / 1001, num: 24e3, den: 1001 },
+  { fps: 3e4 / 1001, num: 3e4, den: 1001 },
+  { fps: 6e4 / 1001, num: 6e4, den: 1001 }
+];
+function frameRateFromNumber(numeric, dropFrame) {
+  if (!Number.isFinite(numeric) || numeric <= 0) throw new Error(`Invalid frame rate: ${numeric}`);
+  const ntsc = NTSC_TABLE.find((entry) => Math.abs(entry.fps - numeric) < 1e-3);
+  if (ntsc) return buildFrameRate(ntsc.num, ntsc.den, dropFrame);
+  if (Number.isInteger(numeric)) return buildFrameRate(numeric, 1, dropFrame);
+  return buildFrameRate(Math.round(numeric * 1e3), 1e3, dropFrame);
+}
+function frameRateFromString(text) {
+  const trimmed = text.trim();
+  const dropFrame = /df$/i.test(trimmed);
+  const numeric = Number(trimmed.replace(/df$/i, ""));
+  return frameRateFromNumber(numeric, dropFrame);
+}
+var FrameRates = {
+  "23.976": buildFrameRate(24e3, 1001, false),
+  "24": buildFrameRate(24, 1, false),
+  "25": buildFrameRate(25, 1, false),
+  "29.97": buildFrameRate(3e4, 1001, false),
+  "29.97df": buildFrameRate(3e4, 1001, true),
+  "30": buildFrameRate(30, 1, false),
+  "50": buildFrameRate(50, 1, false),
+  "59.94": buildFrameRate(6e4, 1001, false),
+  "59.94df": buildFrameRate(6e4, 1001, true),
+  "60": buildFrameRate(60, 1, false)
+};
+function frameRate(input) {
+  if (typeof input === "number") return frameRateFromNumber(input, false);
+  if (typeof input === "string") return frameRateFromString(input);
+  if (input && typeof input === "object" && "num" in input) {
+    return buildFrameRate(input.num, input.den ?? 1, Boolean(input.dropFrame));
+  }
+  throw new Error(`Invalid frame rate: ${JSON.stringify(input)}`);
+}
+var FRAME_EPSILON = 1e-6;
+function frameToMs(frame, rate) {
+  return frame * 1e3 * rate.den / rate.num;
+}
+function msToFrame(ms, rate) {
+  return Math.floor(ms * rate.num / (1e3 * rate.den) + FRAME_EPSILON);
+}
+function snapToFrame(ms, rate) {
+  return frameToMs(msToFrame(ms, rate), rate);
+}
+var FRAMES_RE = /^(-?\d+(?:\.\d+)?)f$/i;
+var SECONDS_RE = /^(-?\d+(?:\.\d+)?)s$/i;
+var MS_RE = /^(-?\d+(?:\.\d+)?)ms$/i;
+var TIMECODE_RE = /^\d{1,2}:\d{2}:\d{2}[:;]\d{1,2}$/;
+function parseTime(input, rate) {
+  if (typeof input === "number") return input;
+  const text = input.trim();
+  const framesMatch = text.match(FRAMES_RE);
+  if (framesMatch) {
+    if (rate == null) throw new Error(`parseTime: "${input}" is a frame value and needs a frameRate`);
+    return frameToMs(Number(framesMatch[1]), frameRate(rate));
+  }
+  const secondsMatch = text.match(SECONDS_RE);
+  if (secondsMatch) return Number(secondsMatch[1]) * 1e3;
+  const msMatch = text.match(MS_RE);
+  if (msMatch) return Number(msMatch[1]);
+  if (TIMECODE_RE.test(text)) {
+    if (rate == null) throw new Error(`parseTime: "${input}" is a timecode and needs a frameRate`);
+    return timecodeToMs(text, frameRate(rate));
+  }
+  const plain = Number(text);
+  if (text !== "" && Number.isFinite(plain)) return plain;
+  throw new Error(`parseTime: unrecognized time value "${input}"`);
+}
+function formatTime(ms, rate, style = "ms") {
+  if (style === "ms") return `${Math.round(ms)}ms`;
+  if (style === "seconds") return `${(ms / 1e3).toFixed(3)}s`;
+  if (rate == null) throw new Error(`formatTime: style "${style}" needs a frameRate`);
+  const resolved = frameRate(rate);
+  if (style === "frames") return `${msToFrame(ms, resolved)}f`;
+  return formatTimecode(msToTimecode(ms, resolved));
+}
+
 // src/core.ts
 var Line = class {
   curves;
@@ -314,8 +495,16 @@ var Tween = class {
     this.duration = Math.max(0, duration);
     return this;
   }
+  /** The frame index the tween's active time falls in, at `rate` (default 60 fps). Floor-based: matches which frame is on screen. */
+  frameAt(rate = 60) {
+    return msToFrame(Math.max(0, this.elapsed - this.delay), frameRate(rate));
+  }
+  /** The SMPTE timecode for the tween's active time, at `rate`. */
+  timecodeAt(rate) {
+    return msToTimecode(Math.max(0, this.elapsed - this.delay), frameRate(rate));
+  }
   getCurrentFrame(fps = 60) {
-    return Math.ceil(Math.max(0, this.elapsed - this.delay) / 1e3 * fps);
+    return this.frameAt(fps);
   }
   get activeDuration() {
     return this.repeat === Infinity ? Infinity : this.duration * (this.repeat + 1) + this.repeatDelay * this.repeat;
@@ -355,14 +544,19 @@ var Tween = class {
     });
   }
 };
+var TIME_LITERAL_RE = /^-?\d+(?:\.\d+)?(?:f|s|ms)$|^\d{1,2}:\d{2}:\d{2}[:;]\d{1,2}$/i;
+var ANCHOR_RE = /^([<>])(?:([+-]=)(.+))?$/;
+var LABEL_OFFSET_RE = /^(.+?)([+-]=)(.+)$/;
 var Timeline = class {
   entries = [];
   labels = /* @__PURE__ */ new Map();
   cursor = 0;
   driver;
   options;
+  rateInput;
   constructor(options = {}) {
     this.options = options;
+    this.rateInput = options.frameRate;
     this.driver = new Tween({
       from: 0,
       to: 0,
@@ -385,8 +579,18 @@ var Timeline = class {
   get finished() {
     return this.driver.finished;
   }
+  /** The timeline's own frame rate (default 60 fps), used for `.frames`, `.timecode()`, `snap`, and frame/timecode positions. */
+  get frameRate() {
+    return frameRate(this.rateInput ?? 60);
+  }
+  get frames() {
+    return msToFrame(this.duration, this.frameRate);
+  }
+  timecode(ms = this.duration) {
+    return msToTimecode(ms, this.frameRate);
+  }
   label(name, at = this.cursor) {
-    this.labels.set(name, at);
+    this.labels.set(name, this.resolvePosition(at, this.entries.at(-1)));
     return this;
   }
   add(tween, at) {
@@ -436,17 +640,28 @@ var Timeline = class {
     return this;
   }
   render(time) {
-    for (const entry of this.entries) entry.tween.sampleAt(time - entry.start);
-    this.options.onUpdate?.(time, this.duration ? time / this.duration : 1);
+    const sampled = this.options.snap ? snapToFrame(time, this.frameRate) : time;
+    for (const entry of this.entries) entry.tween.sampleAt(sampled - entry.start);
+    this.options.onUpdate?.(sampled, this.duration ? sampled / this.duration : 1);
   }
   resolvePosition(at, previous) {
-    if (at == null || at === ">") return previous?.end ?? 0;
-    if (at === "<") return previous?.start ?? 0;
+    if (at == null) return previous?.end ?? 0;
     if (typeof at === "number") return Math.max(0, at);
-    const match = at.match(/^([^+-]+)([+-]=)(\d+(?:\.\d+)?)$/);
-    const base = this.labels.get(match?.[1] ?? at);
+    const text = at.trim();
+    const anchorMatch = text.match(ANCHOR_RE);
+    if (anchorMatch) {
+      const [, anchor, op, offsetText] = anchorMatch;
+      const base2 = anchor === "<" ? previous?.start ?? 0 : previous?.end ?? 0;
+      if (!op) return Math.max(0, base2);
+      return Math.max(0, base2 + parseTime(offsetText, this.rateInput) * (op === "+=" ? 1 : -1));
+    }
+    if (TIME_LITERAL_RE.test(text)) return Math.max(0, parseTime(text, this.rateInput));
+    const labelMatch = text.match(LABEL_OFFSET_RE);
+    const labelName = labelMatch ? labelMatch[1] : text;
+    const base = this.labels.get(labelName);
     if (base == null) throw new Error(`Unknown timeline label: ${at}`);
-    return Math.max(0, base + (match ? Number(match[3]) * (match[2] === "+=" ? 1 : -1) : 0));
+    if (!labelMatch) return Math.max(0, base);
+    return Math.max(0, base + parseTime(labelMatch[3], this.rateInput) * (labelMatch[2] === "+=" ? 1 : -1));
   }
 };
 var MotionValue = class {
@@ -494,23 +709,37 @@ var defaultRenderContext = { direction: 1, fireCues: true };
 var src_default = { Tween, Timeline, Line, MotionValue, animate, stagger, Easing, cubicBezier, spring };
 export {
   Easing,
+  FrameRates,
   FrameScheduler,
   Line,
   MotionValue,
   Timeline,
   Tween,
   activeDuration,
+  addFrames,
   animate,
   cubicBezier,
   src_default as default,
   defaultRenderContext,
+  formatTime,
+  formatTimecode,
+  frameRate,
+  frameToMs,
+  framesToTimecode,
   interpolate,
   mix,
+  msToFrame,
+  msToTimecode,
+  parseTime,
+  parseTimecode,
   resolveEasing,
   sampleCycle,
   scheduler,
+  snapToFrame,
   spring,
   stagger,
+  timecodeToFrames,
+  timecodeToMs,
   totalDuration
 };
 //# sourceMappingURL=index.js.map
