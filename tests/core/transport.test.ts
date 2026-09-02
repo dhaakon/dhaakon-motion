@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest';
-import { Transport, frameRate, frameToMs, msToFrame } from '@dhaakon/motion';
+import { Timeline, Transport, Tween, frameRate, frameToMs, msToFrame } from '@dhaakon/motion';
 import { createTestScheduler } from '@dhaakon/motion/testing';
 
 test('play/pause/resume keeps the anchor correct', () => {
@@ -49,6 +49,74 @@ test('a loop region wraps and carries the overshoot forward', () => {
   expect(transport.time).toBe(50);
   expect(laps).toBe(1);
   expect(transport.state).toBe('playing'); // a loop never finishes
+});
+
+test('a forward loop is half-open and never emits its upper-bound frame', () => {
+  const { driver, scheduler: loop } = createTestScheduler();
+  const transport = new Transport({ scheduler: loop, duration: '144f', frameRate: 24, snap: true, loop: ['0f', '144f'] });
+  const frames: number[] = [];
+  transport.subscribe((info) => frames.push(info.frame));
+  transport.play();
+  driver.step(6000); // exactly 144f: wraps to the first frame of the next lap
+  expect(transport.frame).toBe(0);
+  expect(frames).toEqual([0]);
+  transport.seekFrame(143);
+  transport.step(1);
+  expect(transport.frame).toBe(0);
+  expect(frames).not.toContain(144);
+});
+
+test('many realtime loop ticks emit exactly once and stay within frames 0 through 143', () => {
+  const { driver, scheduler: loop } = createTestScheduler();
+  const transport = new Transport({ scheduler: loop, duration: '144f', frameRate: 24, snap: true, loop: ['0f', '144f'] });
+  const seen: number[] = [];
+  transport.subscribe((info) => seen.push(info.frame));
+  transport.play();
+  for (let index = 0; index < 1000; index += 1) driver.advance(17);
+  expect(seen).toHaveLength(1000);
+  expect(Math.min(...seen)).toBeGreaterThanOrEqual(0);
+  expect(Math.max(...seen)).toBeLessThanOrEqual(143);
+  expect(seen).not.toContain(144);
+});
+
+test('stepping onto a loop upper bound carries its cue forward without backward misfires', () => {
+  const { scheduler: loop } = createTestScheduler();
+  const directions: number[] = [];
+  const timeline = new Timeline().add(new Tween({ duration: 6000 }), 0)
+    .cue('middle', 3000, (event) => directions.push(event.direction))
+    .cue('OUT', 6000, (event) => directions.push(event.direction));
+  const transport = new Transport({ scheduler: loop, root: timeline, frameRate: 24, loop: ['0f', '144f'] });
+  const emitted: Array<{ frame: number; cues: string[] }> = [];
+  transport.subscribe((info) => emitted.push({ frame: info.frame, cues: (info.cues ?? []).map((cue) => cue.name) }));
+  transport.seek('143f', { cues: 'skip' });
+  emitted.length = 0;
+  directions.length = 0;
+  transport.step(1);
+  expect(emitted).toEqual([{ frame: 0, cues: ['OUT'] }]);
+  expect(directions).toEqual([1]);
+});
+
+test('an end cue is carried onto the wrapped tick without emitting the upper bound', () => {
+  const { driver, scheduler: loop } = createTestScheduler();
+  const timeline = new Timeline().add(new Tween({ duration: 6000 }), 0);
+  timeline.cue('OUT', 6000, () => {});
+  const transport = new Transport({ scheduler: loop, root: timeline, frameRate: 24, loop: [0, 6000] });
+  const ticks: Array<{ frame: number; cues: string[] }> = [];
+  transport.subscribe((info) => ticks.push({ frame: info.frame, cues: (info.cues ?? []).map((cue) => cue.name) }));
+  transport.play();
+  driver.step(6000);
+  expect(ticks).toEqual([{ frame: 0, cues: ['OUT'] }]);
+});
+
+test('a loop rebase does not misfire forward cues as backward crossings', () => {
+  const { driver, scheduler: loop } = createTestScheduler();
+  const directions: number[] = [];
+  const timeline = new Timeline().add(new Tween({ duration: 200 }), 0).cue('mid', 50, (event) => directions.push(event.direction));
+  const transport = new Transport({ scheduler: loop, root: timeline, loop: [0, 200] });
+  transport.play();
+  driver.step(60);
+  driver.step(250);
+  expect(directions).toEqual([1, 1]);
 });
 
 test('finished resolves once the end is reached without a loop', async () => {

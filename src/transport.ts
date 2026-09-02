@@ -166,7 +166,21 @@ export class Transport {
   toggle(): this { return this._state === 'playing' ? this.pause() : this.play(); }
 
   seek(to: TimeInput, options: { cues?: 'fire' | 'skip' } = {}): this {
-    const target = Math.max(0, Math.min(this.boundedDuration(), parseTime(to, this.frameRate)));
+    let target = Math.max(0, Math.min(this.boundedDuration(), parseTime(to, this.frameRate)));
+    // Loop ranges are half-open: their upper bound is the next lap's first instant.
+    // Mapping an exact seek keeps frame `b` from leaking between `b - 1f` and `a`.
+    if (this.loopRegion && target === this.loopRegion[1]) {
+      const [a, b] = this.loopRegion;
+      const carriedCues = this.renderAt(b, options.cues !== 'skip', { emit: false, direction: 1 });
+      this.fireLoop();
+      this.renderAt(a, false, { emit: false, direction: 1 });
+      target = a;
+      this._time = target;
+      if (this._state === 'playing') { this.anchorClock = this.clock.now(); this.anchorTime = target; }
+      this.renderAt(target, false, { direction: 1, carriedCues });
+      this.emitSeek();
+      return this;
+    }
     this._time = target;
     if (this._state === 'playing') { this.anchorClock = this.clock.now(); this.anchorTime = target; }
     this.renderAt(target, options.cues !== 'skip');
@@ -243,21 +257,25 @@ export class Transport {
       const len = b - a;
       let remaining = rawTime;
       let guard = 0;
+      const carriedCues: CueEvent[] = [];
       while (len > 0 && guard++ < 10000) {
         if (this._rate >= 0) {
-          if (remaining <= b) break;
-          this.renderAt(b, true);
+          if (remaining < b) break;
+          carriedCues.push(...this.renderAt(b, true, { emit: false, direction: 1 }));
           this.fireLoop();
           remaining = a + (remaining - b);
+          // Rebase Timeline crossing state without publishing a transient frame.
+          this.renderAt(a, false, { emit: false, direction: 1 });
         } else {
           if (remaining >= a) break;
-          this.renderAt(a, true);
+          carriedCues.push(...this.renderAt(a, true, { emit: false, direction: -1 }));
           this.fireLoop();
           remaining = b + (remaining - a);
+          this.renderAt(b, false, { emit: false, direction: -1 });
         }
       }
       this._time = Math.max(a, Math.min(b, remaining));
-      this.renderAt(this._time, true);
+      this.renderAt(this._time, true, { direction: this._rate >= 0 ? 1 : -1, carriedCues });
       return;
     }
     const duration = this.duration;
@@ -269,9 +287,9 @@ export class Transport {
     if (reachedEnd && this._state === 'playing') this.finish();
   }
 
-  private renderAt(time: number, fireCues: boolean) {
+  private renderAt(time: number, fireCues: boolean, options: { emit?: boolean; direction?: 1 | -1; carriedCues?: CueEvent[] } = {}): CueEvent[] {
     const quantized = this.snap ? this.frameSnap(time) : time;
-    const direction: 1 | -1 = quantized >= this.lastRenderedTime ? 1 : -1;
+    const direction: 1 | -1 = options.direction ?? (quantized >= this.lastRenderedTime ? 1 : -1);
     const delta = quantized - this.lastRenderedTime;
     this._time = quantized;
     const info: FrameInfo = {
@@ -280,14 +298,17 @@ export class Transport {
       timecode: formatTimecode(msToTimecode(quantized, this.frameRate)),
       delta, rate: this._rate, direction, frameRate: this.frameRate,
     };
-    this.pendingCues = null;
+    this.pendingCues = options.carriedCues?.length ? options.carriedCues.slice() : null;
     this.root.sampleAt(quantized, { direction, fireCues, frame: info, transport: this });
     if (this.pendingCues) info.cues = this.pendingCues;
-    for (const output of this.outputs) {
-      try { output.onTick?.(info); } catch (err) { this.onError(err); }
+    if (options.emit !== false) {
+      for (const output of this.outputs) {
+        try { output.onTick?.(info); } catch (err) { this.onError(err); }
+      }
+      for (const listener of this.listeners) listener(info, this);
     }
-    for (const listener of this.listeners) listener(info, this);
     this.lastRenderedTime = quantized;
+    return info.cues ?? [];
   }
 
   /** Records that a cue fired during the current tick (called by `Timeline`). Not usually called directly. */

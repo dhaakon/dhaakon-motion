@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2
+
+### Fixed
+
+- Transport loop regions are now consistently half-open (`[from, to)`). The upper-bound frame is sampled silently for end cues but is never emitted to outputs or subscribers before the wrapped frame.
+- Exact seeks and frame steps onto a loop's upper bound wrap directly to its first frame, carrying end cues forward without generating backward cue crossings.
+- A loop tick now emits exactly one public frame even when it crosses the boundary; internal endpoint and rebase samples no longer leak into UI playheads.
+
 ## 0.5.1
 
 ### Fixed
