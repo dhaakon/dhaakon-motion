@@ -486,6 +486,45 @@ function DeferredThreeShowcase() {
   </div>;
 }
 
+const engineFeatures = [
+  ['01', 'Production timebase', 'Author directly in frames, SMPTE, and 29.97 drop-frame timecode. Every nested tween inherits the Transport frame rate.'],
+  ['02', 'Deterministic output', 'Render exact frames without requestAnimationFrame or wall-clock drift, then compare repeatable state hashes in tests.'],
+  ['03', 'Portable show files', 'Validate, load, inspect, and serialize cue sheets and scene states without embedding live renderer objects.'],
+  ['04', 'One ordered transport', 'Write values once, then draw DOM, SVG, Canvas, Three.js, audio, MIDI, OSC, or hardware signals after the same tick.'],
+  ['05', 'Bidirectional cues', 'Markers and nested cues understand forward and reverse travel, loops, snapping, exact seeking, and frame stepping.'],
+  ['06', 'Inspection as an API', 'Trace timelines, snapshot frames, print ASCII structure, inject schedulers, and diagnose regressions without a browser clock.'],
+] as const;
+
+const engineComparison = [
+  ['Frame / SMPTE timebase', 'FIRST-CLASS', 'CUSTOM LAYER', 'CUSTOM LAYER', 'FPS ENGINE'],
+  ['Deterministic offline frames', 'BUILT IN', 'MANUAL HARNESS', 'MANUAL HARNESS', 'CUSTOM LOOP'],
+  ['Serializable cue sheets', 'JSON + VALIDATION', 'APPLICATION CODE', 'APPLICATION CODE', 'APPLICATION CODE'],
+  ['Ordered multi-output transport', 'ATTACHED OUTPUTS', 'PLUGIN / CALLBACK', 'OBJECT VALUES', 'TARGETS / CALLBACKS'],
+  ['Timeline inspection + assertions', 'TRACE + SNAPSHOTS', 'DEVTOOLS ECOSYSTEM', 'APPLICATION CODE', 'ENGINE INSPECTION'],
+  ['React composition lifecycle', 'NATIVE ENTRY', 'OFFICIAL HOOK', 'CORE STRENGTH', 'INTEGRATION LAYER'],
+] as const;
+
+function EngineProfile() {
+  return <section className="section inverse profile-section" id="profile">
+    <SectionTitle number="PROFILE" title="Small engine. Production clock." subtitle="A compact tween core with the timing, portability, and inspection primitives usually left to application code."/>
+    <div className="profile-stats">
+      {[
+        ['42.3', 'kB minified', 'complete core export'],
+        ['13.4', 'kB gzip', 'complete core export'],
+        ['3.6', 'kB gzip', 'React entry'],
+        ['0', 'dependencies', 'core runtime'],
+      ].map(([value, unit, note], index) => <Reveal as="article" key={unit + note} from={{ y: 24, opacity: 0 }} transition={{ delay: index * 60 }}><strong>{value}</strong><div><b>{unit}</b><small>{note}</small></div></Reveal>)}
+    </div>
+    <p className="size-method">Measured from v0.5.2 ESM output with esbuild minification and gzip -9. Optional React, Three.js, audio, MIDI, testing, and devtools adapters remain separate entry points.</p>
+    <div className="profile-features">{engineFeatures.map(([number, title, text], index) => <Reveal as="article" key={title} from={{ y: 24, opacity: 0 }} transition={{ delay: index * 45 }}><span>{number}</span><h3>{title}</h3><p>{text}</p></Reveal>)}</div>
+    <Reveal className="comparison-shell" from={{ y: 30, opacity: 0 }} amount={0.12}>
+      <header><div><p className="eyebrow">[ CAPABILITY MAP ]</p><h3>Where it stands apart</h3></div><p>Dhaakon Motion is not trying to replace every UI animation library. Its advantage is a production-oriented model of time that remains portable across render targets.</p></header>
+      <div className="comparison-scroll"><table><thead><tr><th>Capability</th><th>Dhaakon Motion</th><th>GSAP</th><th>Motion</th><th>Anime.js</th></tr></thead><tbody>{engineComparison.map(([feature, ...values]) => <tr key={feature}><th>{feature}</th>{values.map((value, index) => <td key={value + index}><span className={index === 0 ? 'comparison-native' : ''}>{value}</span></td>)}</tr>)}</tbody></table></div>
+      <p className="comparison-note">Capability model, not a speed ranking. GSAP excels at deep sequencing and plugins; Motion at React, gestures, and layout; Anime.js at approachable timeline animation. Dhaakon Motion differentiates itself when frames, cue sheets, offline renders, and heterogeneous outputs must share one inspectable clock.</p>
+    </Reveal>
+  </section>;
+}
+
 export function App({ version }: { version: string }) {
   useEffect(() => {
     const id = decodeURIComponent(window.location.hash.slice(1));
@@ -497,10 +536,11 @@ export function App({ version }: { version: string }) {
   }, []);
 
   return <MotionConfig transition={{ duration: 360, easing: 'dhaakon' }}>
-    <motion.header className="site-head" initial={{ y: -18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 440 }}><a className="wordmark" href="#top"><i>◇</i> DHAAKON / MOTION</a><nav><a href="#why">Why</a><a href="#playground">Playground</a><a href="#react">React</a><a href="#compositions">Compositions</a><a href="#three">Three.js</a><a href="#transport">Transport</a><a href="#api">API</a></nav><Badge tone="accent">v{version}</Badge></motion.header>
+    <motion.header className="site-head" initial={{ y: -18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 440 }}><a className="wordmark" href="#top"><i>◇</i> DHAAKON / MOTION</a><nav><a href="#profile">Profile</a><a href="#why">Why</a><a href="#playground">Playground</a><a href="#react">React</a><a href="#compositions">Compositions</a><a href="#three">Three.js</a><a href="#transport">Transport</a><a href="#api">API</a></nav><Badge tone="accent">v{version}</Badge></motion.header>
     <main id="top">
       <section className="hero"><div className="hero-copy"><motion.p className="eyebrow" initial={{ y: 16, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 100 }}>[ MOTION SYSTEM 02 ] · BUILT FROM DHAAK-ANIM</motion.p><motion.h1 initial={{ y: 28, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 160 }}>Movement with<br/><em>direction.</em></motion.h1><motion.p className="lead" initial={{ y: 22, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 240 }}>A compact tween engine for interfaces, timelines, canvas, and React compositions. One frame loop. Zero core dependencies.</motion.p><motion.div className="install" initial={{ y: 18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 320 }}><code>npm i @dhaakon/motion</code><span>↗ VERDACCIO :21760</span></motion.div></div><HeroOrbit /></section>
-      <section className="metrics">{[['1','shared frame loop'],['0','core dependencies'],['2','entry points'],[String(scheduler.size),'active right now']].map(([value,label], index) => <Reveal as="div" key={label} from={{ y: 20, opacity: 0 }} transition={{ delay: index * 65 }}><strong>{value}</strong><span>{label}</span></Reveal>)}</section>
+      <section className="metrics">{[['1','shared frame loop'],['0','core dependencies'],['7','entry points'],[String(scheduler.size),'active right now']].map(([value,label], index) => <Reveal as="div" key={label} from={{ y: 20, opacity: 0 }} transition={{ delay: index * 65 }}><strong>{value}</strong><span>{label}</span></Reveal>)}</section>
+      <EngineProfile/>
       <section className="section why-section" id="why"><SectionTitle number="01" title="Animation is a systems problem" subtitle="A transition moves one element. An engine coordinates an experience."/><div className="why-intro"><Reveal className="why-thesis" from={{ x: -30, opacity: 0 }}><p className="eyebrow">[ THE PRODUCTION THRESHOLD ]</p><h3>Time becomes infrastructure when more than one thing must move together.</h3><p>CSS is ideal for an isolated hover or disclosure. The moment a cue must synchronize a camera, shader, DOM overlay, waveform, particles, and audio envelope—and still pause, seek, reverse, test, and honor reduced motion—you need one authority for time.</p></Reveal><div className="why-points">{[['01','One clock','Independent timers drift. A shared scheduler keeps every renderer on the same frame.'],['02','Real control','Timelines make a whole composition pauseable, reversible, seekable, repeatable, and deterministic.'],['03','Renderer freedom','Values are not CSS. The same interpolation can target React, SVG, Canvas, WebGL, audio, or hardware.'],['04','Separation','Application state describes intent; the engine resolves time; each renderer writes its own pixels.']].map(([number,title,text], index) => <Reveal as="article" key={title} from={{ y: 24, opacity: 0 }} transition={{ delay: index * 65 }}><span>{number}</span><h4>{title}</h4><p>{text}</p></Reveal>)}</div></div><Reveal className="engine-map" from={{ y: 34, opacity: 0 }} amount={0.2}><div className="engine-intent"><small>APPLICATION INTENT</small><strong>“Take scene live”</strong></div><i>→</i><div className="engine-clock"><small>DHAAKON MOTION</small><strong>Timeline + one frame loop</strong><span>pause · seek · reverse · test</span></div><i>→</i><div className="engine-targets">{['DOM','SVG','CANVAS','THREE.JS','AUDIO'].map((target) => <b key={target}>{target}</b>)}</div></Reveal></section>
       <section className="section" id="playground"><SectionTitle number="02" title="Core playground" subtitle="The old syntax remains familiar; the clock underneath is entirely new."/><div className="demo-grid"><RevealCell delay={0}><TweenPlayground/></RevealCell><RevealCell delay={70}><EasingTracks/></RevealCell><RevealCell delay={140}><TimelinePlayground/></RevealCell><RevealCell delay={210}><MotionValueDemo/></RevealCell></div></section>
       <section className="section inverse" id="react"><SectionTitle number="03" title="React, composed" subtitle="Declarative when it helps. Imperative at the frame boundary."/><div className="demo-grid"><RevealCell delay={0}><ReactComposition/></RevealCell><RevealCell delay={90}><RenderPropDemo/></RevealCell></div><div className="code-grid"><CodePanel><h3>DOM composition</h3><p>Use <code>motion.*</code> for transform and style animation without a React render on every frame.</p><Code>{reactCode}</Code></CodePanel><CodePanel delay={100}><h3>Reveal on scroll</h3><p><code>Reveal</code>, <code>whileInView</code>, and <code>useInView</code> share the same observer and respect reduced-motion preferences.</p><Code>{revealCode}</Code></CodePanel></div></section>
