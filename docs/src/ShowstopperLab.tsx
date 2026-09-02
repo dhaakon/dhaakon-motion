@@ -43,19 +43,19 @@ const showSheet: CueSheet = {
           { at: '0f', value: { position: [0, 1.1, 8.6], fov: 46 } },
           { at: '48f', value: { position: [-2.5, 1.8, 6.2], fov: 38 }, easing: 'dhaakon' },
           { at: '96f', value: { position: [2.1, .55, 5.1], fov: 31 }, easing: 'easeInOutCubic' },
-          { at: '144f', value: { position: [0, 1.2, 7.4], fov: 44 }, easing: 'dhaakon' },
+          { at: '144f', value: { position: [0, 1.1, 8.6], fov: 46 }, easing: 'dhaakon' },
         ] },
         { type: 'track', name: 'scene-rig', target: 'rig', at: '0f', keyframes: [
           { at: '0f', value: { rotation: [0, 0, 0], scale: .72 } },
           { at: '72f', value: { rotation: [.5, 3.2, .15], scale: 1.08 }, easing: 'dhaakon' },
-          { at: '144f', value: { rotation: [.1, 6.28, 0], scale: .78 }, easing: 'easeInOutCubic' },
+          { at: '144f', value: { rotation: [0, 6.283185307, 0], scale: .72 }, easing: 'easeInOutCubic' },
         ] },
         { type: 'track', name: 'volume-energy', target: 'energy', at: '0f', keyframes: [
           { at: '0f', value: .08 }, { at: '24f', value: .22 },
-          { at: '72f', value: 1, easing: 'easeOutBack' }, { at: '132f', value: .12 },
+          { at: '72f', value: 1, easing: 'easeOutBack' }, { at: '132f', value: .12 }, { at: '144f', value: .08 },
         ] },
         { type: 'track', name: 'exposure', target: 'exposure', at: '0f', keyframes: [
-          { at: '0f', value: .72 }, { at: '72f', value: 1.36 }, { at: '144f', value: .8 },
+          { at: '0f', value: .72 }, { at: '72f', value: 1.36 }, { at: '144f', value: .72 },
         ] },
       ],
     },
@@ -94,6 +94,12 @@ function ControlSurface({ enableAudio, verify, offlineHash, packet, trace }: {
   enableAudio(): void; verify(): void; offlineHash: string; packet: string; trace: string;
 }) {
   const transport = useTransport(); const playhead = usePlayhead({ fps: 15 }); const state = useTransportState();
+  const progressRef = useRef<HTMLElement | null>(null); const scrubRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => transport.subscribe(() => {
+    const progress = transport.progress;
+    if (progressRef.current) progressRef.current.style.transform = `scaleX(${progress})`;
+    if (scrubRef.current) scrubRef.current.value = String(Math.round(progress * 1000));
+  }), [transport]);
   const nextMarker = () => { const marker = transport.root.nextMarker(transport.time); transport.seek(marker?.time ?? 0); };
   return <>
     <div className="show-hud">
@@ -102,7 +108,7 @@ function ControlSurface({ enableAudio, verify, offlineHash, packet, trace }: {
       <div><small>TRANSPORT</small><strong>{state.state.toUpperCase()}</strong></div>
       <div><small>OFFLINE HASH</small><strong>{offlineHash || 'NOT RUN'}</strong></div>
     </div>
-    <div className="show-scrub"><i style={{ transform: `scaleX(${playhead.progress})` }}/><input aria-label="Scrub show timeline" type="range" min={0} max={1000} value={Math.round(playhead.progress * 1000)} onChange={(event) => transport.seek((Number(event.target.value) / 1000) * transport.duration)}/>{transport.root.markers.map((marker) => <button key={marker.name} style={{ left: `${marker.time / transport.duration * 100}%` }} onClick={() => transport.seek(marker.time)} title={marker.name}/>)}</div>
+    <div className="show-scrub"><i ref={progressRef}/><input ref={scrubRef} aria-label="Scrub show timeline" type="range" min={0} max={1000} defaultValue={0} onInput={(event) => transport.seek((Number(event.currentTarget.value) / 1000) * transport.duration)}/>{transport.root.markers.map((marker) => <button key={marker.name} style={{ left: `${marker.time / transport.duration * 100}%` }} onClick={() => transport.seek(marker.time)} title={marker.name}/>)}</div>
     <div className="show-controls">
       <Button variant="accent" size="sm" onClick={() => transport.toggle()}>{state.state === 'playing' ? 'Pause take' : 'Roll take'}</Button>
       <Button variant="outline" size="sm" onClick={() => transport.step(-1)}>−1f</Button>
@@ -144,7 +150,7 @@ export function ShowstopperLab() {
     } });
     const show = new Transport({ root: timeline, frameRate: 24, snap: true, loop: [0, '144f'] }); const trace = show.trace({ capacity: 8 });
     const outputs: TransportOutput[] = [
-      threeOutput({ renderer, scene, camera, name: 'THREE / PROGRAM', onBeforeRender: (info) => { stars.rotation.y = info.time * .00005; cage.rotation.x = -info.time * .00008; } }),
+      threeOutput({ renderer, scene, camera, name: 'THREE / PROGRAM', onBeforeRender: (info) => { const phase = info.time / 6000 * Math.PI * 2; stars.rotation.y = phase; cage.rotation.x = -phase; } }),
       drawOutput((info) => { const ctx = waveform.getContext('2d'); if (!ctx) return; const rect = waveform.getBoundingClientRect(); const ratio = Math.min(2, window.devicePixelRatio); if (waveform.width !== Math.round(rect.width * ratio)) { waveform.width = Math.round(rect.width * ratio); waveform.height = Math.round(rect.height * ratio); } ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, rect.width, rect.height); ctx.strokeStyle = '#d9ff43'; ctx.lineWidth = 1.5; ctx.beginPath(); for (let x = 0; x <= rect.width; x += 3) { const y = rect.height / 2 + Math.sin(x * .06 + info.time * .012) * (4 + latest.current.audio * 20); x ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.stroke(); }, { name: 'CANVAS / AUDIO SCOPE' }),
       signalOutput((signal, cue, info) => { setPacket(`${info.timecode} / ${cue.name} / ${JSON.stringify(signal)}`); }, { name: 'OSC + MIDI + DMX' }),
     ];
