@@ -420,7 +420,9 @@ function CueSheetExample() {
 }
 
 function ComplexExample({ number, title, description, code, delay = 0, children }: { number: string; title: string; description: string; code: string; delay?: number; children: React.ReactNode }) {
-  return <Reveal as="article" className="complex-example" from={{ y: 38, opacity: 0 }} amount={0.08} transition={{ duration: 600, delay }}><header><span>[ {number} ]</span><h3>{title}</h3><p>{description}</p><Badge tone="accent">React + TypeScript</Badge></header><div className="complex-body"><div className="complex-live">{children}</div><Code>{code}</Code></div></Reveal>;
+  const compact = number === '06.1';
+  const copy = compact ? 'Author in frames or SMPTE. The 29.97 DF Transport handles conversion, cues, scrubbing, and exact frame steps.' : description;
+  return <Reveal as="article" className={`complex-example${compact ? ' complex-example--compact' : ''}`} from={{ y: 38, opacity: 0 }} amount={0.08} transition={{ duration: 600, delay }}><header><span>[ {number} ]</span><h3>{title}</h3><p>{copy}</p><Badge tone="accent">React + TypeScript</Badge></header><div className="complex-body"><div className="complex-live">{children}</div><Code>{code}</Code></div></Reveal>;
 }
 
 function Demo({ title, note, children }: { title: string; note: string; children: React.ReactNode }) {

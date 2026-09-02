@@ -110,6 +110,20 @@ footer { min-height:110px; padding:30px 4vw; display:flex; align-items:flex-end;
 .production-stack .complex-body { grid-template-columns:minmax(430px,1.08fr) minmax(380px,.92fr); }
 .production-stack .complex-live,.production-stack .complex-body>.code { min-height:520px; }
 .production-stack .complex-body>.code pre { min-height:520px; max-height:520px; }
+.production-stack .complex-example--compact .complex-live,.production-stack .complex-example--compact .complex-body>.code { min-height:390px; }
+.production-stack .complex-example--compact .complex-body>.code pre { min-height:390px; max-height:390px; }
+.production-stack .complex-example--compact>header h3 { margin-top:24px; }
+.production-stack .complex-example--compact>header p { margin-bottom:20px; }
+.production-stack .complex-example--compact .lab { min-height:390px; padding:15px; gap:9px; }
+.production-stack .complex-example--compact .tc-stage { height:158px; }
+.production-stack .complex-example--compact .tc-safe { inset:14px 22px; }
+.production-stack .complex-example--compact .tc-hero { left:28px; top:34px; }
+.production-stack .complex-example--compact .tc-hero small { margin-bottom:10px; }
+.production-stack .complex-example--compact .tc-hero b { font-size:30px; }
+.production-stack .complex-example--compact .tc-lower { left:28px; bottom:20px; padding:7px 10px; }
+.production-stack .complex-example--compact .marker-strip { height:28px; }
+.production-stack .complex-example--compact .marker-strip::before { top:13px; }
+.production-stack .complex-example--compact .event-log { display:none; }
 .lab { min-height:520px; box-sizing:border-box; padding:20px; display:flex; flex-direction:column; gap:14px; overflow:hidden; background:#101010; color:#f0eee8; --lab-line:rgba(240,238,232,.23); }
 .lab button.dhk-btn--outline { color:#f0eee8; border-color:rgba(240,238,232,.62); }
 .lab button.dhk-btn--outline:hover { color:#101010; background:#f0eee8; }
