@@ -6,6 +6,7 @@ import type { RenderContext, TimelineItem } from './items';
 import { frameRate, msToFrame, parseTime, type FrameRate, type FrameRateInput, type TimeInput } from './time';
 import { msToTimecode, type Timecode } from './timecode';
 import { Track } from './track';
+import { InertiaItem, SpringItem, type InertiaOptions, type PhysicsSpringOptions } from './physics';
 
 export type TweenState = 'idle' | 'delayed' | 'running' | 'paused' | 'finished' | 'cancelled';
 export interface PropertyRange { start: number; end: number; unit?: string; }
@@ -129,6 +130,16 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
   /** The SMPTE timecode for the tween's active time, at `rate`. */
   timecodeAt(rate: FrameRateInput): Timecode { return msToTimecode(Math.max(0, this.elapsed - this.delay), frameRate(rate)); }
   getCurrentFrame(fps = 60) { return this.frameAt(fps); }
+  /** Analytic/numerically differentiated velocity of the current tween value, in units per millisecond. */
+  instantaneousVelocity(): T | number {
+    if (this.duration <= 0) return 0;
+    const epsilon = 1e-4;
+    const before = this.easing(Math.max(0, this.progress - epsilon));
+    const after = this.easing(Math.min(1, this.progress + epsilon));
+    const span = Math.min(1, this.progress + epsilon) - Math.max(0, this.progress - epsilon);
+    const slope = span > 0 ? (after - before) / span : 0;
+    return scaleVelocity(velocityBetween(this.from, this.toValue, this.duration), slope) as T | number;
+  }
   /**
    * A two-keyframe `Track` equivalent to this tween's `from`/`to`/`duration`/`easing`/`repeat`/`repeatDelay`/`direction`.
    * Its `apply` forwards sampled values to this tween's own `onUpdate` (progress is not recomputed — read `value` from the callback).
@@ -176,12 +187,57 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
 
 export class MotionValue<T extends MotionValueShape> {
   private listeners = new Set<() => void>(); private animation?: Tween<T>;
-  constructor(private current: T) {}
+  private previous: T; private previousAt: number; private explicitVelocity?: T | number;
+  private updatedAtValue: number;
+  constructor(private current: T) { this.previous = current; this.updatedAtValue = scheduler.now(); this.previousAt = this.updatedAtValue; }
   get() { return this.current; }
-  set(value: T) { if (Object.is(value, this.current)) return; this.current = value; for (const listener of this.listeners) listener(); }
+  get updatedAt() { return this.updatedAtValue; }
+  get velocity(): T | number {
+    if (this.explicitVelocity !== undefined) return this.explicitVelocity;
+    const elapsed = this.updatedAt - this.previousAt;
+    if (elapsed <= 0 || elapsed > 50) return 0;
+    return velocityBetween(this.previous, this.current, elapsed) as T | number;
+  }
+  set(value: T, time = scheduler.now()) {
+    const changed = !Object.is(value, this.current);
+    this.previous = this.current; this.previousAt = this.updatedAt; this.current = value;
+    this.updatedAtValue = time;
+    this.explicitVelocity = undefined;
+    if (changed) for (const listener of this.listeners) listener();
+  }
+  setWithVelocity(value: T, velocity: T | number, time = scheduler.now()) {
+    const changed = !Object.is(value, this.current);
+    this.previous = this.current; this.previousAt = this.updatedAt; this.current = value;
+    this.updatedAtValue = time;
+    this.explicitVelocity = velocity;
+    if (changed) for (const listener of this.listeners) listener();
+  }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
-  animate(to: T, options: Omit<TweenOptions<T>, 'from' | 'to' | 'onUpdate'> = {}) { this.stop(); this.animation = new Tween({ ...options, from: this.current, to, onUpdate: (value) => this.set(value) }).play(); return this.animation; }
+  animate(to: T, options: Omit<TweenOptions<T>, 'from' | 'to' | 'onUpdate'> = {}) { this.stop(); this.animation = new Tween({ ...options, from: this.current, to, onUpdate: (value, _progress, tween) => this.setWithVelocity(value, tween.instantaneousVelocity(), tween.elapsed) }).play(); return this.animation; }
+  spring(to: T, options: PhysicsSpringOptions<T> = {}) { this.stop(); return new SpringItem<T>({ ...options, from: this.current, to, velocity: options.velocity ?? this.velocity, onUpdate: (value, velocity, time) => this.setWithVelocity(value, velocity, time), autoplay: true }); }
+  decay(options: InertiaOptions<T> = {}) { this.stop(); return new InertiaItem<T>({ ...options, from: this.current, velocity: options.velocity ?? this.velocity, onUpdate: (value, velocity, time) => this.setWithVelocity(value, velocity, time), autoplay: true }); }
   stop() { this.animation?.cancel(); this.animation = undefined; }
+}
+
+function velocityBetween(from: MotionValueShape, to: MotionValueShape, milliseconds: number): MotionValueShape | number {
+  if (typeof from === 'number' && typeof to === 'number') return (to - from) / milliseconds;
+  if (Array.isArray(from) && Array.isArray(to)) return from.map((value, index) => velocityBetween(value, to[index] ?? value, milliseconds)) as MotionValueShape;
+  if (from && to && typeof from === 'object' && typeof to === 'object') {
+    const output: Record<string, MotionValueShape> = {};
+    for (const key of new Set([...Object.keys(from), ...Object.keys(to)])) {
+      const a = (from as Record<string, MotionValueShape | undefined>)[key]; const b = (to as Record<string, MotionValueShape | undefined>)[key];
+      output[key] = a == null || b == null ? 0 : velocityBetween(a, b, milliseconds) as MotionValueShape;
+    }
+    return output;
+  }
+  return 0;
+}
+
+function scaleVelocity(value: MotionValueShape | number, scale: number): MotionValueShape | number {
+  if (typeof value === 'number') return value * scale;
+  if (Array.isArray(value)) return value.map((entry) => scaleVelocity(entry, scale)) as MotionValueShape;
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, scaleVelocity(entry!, scale)])) as MotionValueShape;
+  return 0;
 }
 
 export function animate<T extends MotionValueShape>(from: T, to: T, options: Omit<TweenOptions<T>, 'from' | 'to'> = {}) { return new Tween({ ...options, from, to }).play(); }

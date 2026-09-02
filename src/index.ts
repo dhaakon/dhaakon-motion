@@ -14,6 +14,7 @@ export * from './track';
 export * from './dom';
 export * from './outputs';
 export * from './sheet';
+export * from './physics';
 import { Tween, Line, MotionValue, animate, stagger } from './core';
 import { Timeline } from './timeline';
 import { Transport } from './transport';

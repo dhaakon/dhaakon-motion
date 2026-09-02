@@ -5,6 +5,7 @@ import type { CueEvent, CueOptions, TimelineItem } from './items';
 import { resolveEasing, serializeEasing, type EasingFunction, type EasingInput } from './easing';
 import { frameRate, parseTime, type FrameRateInput, type TimeInput } from './time';
 import type { MotionValueShape } from './interpolate';
+import { InertiaItem, SpringItem, type InertiaOptions, type PhysicsSpringOptions } from './physics';
 
 export type SheetDirection = 'normal' | 'alternate';
 
@@ -28,8 +29,17 @@ export interface TimelineSheetItem {
   markers?: SheetMarker[]; cues?: SheetCue[]; regions?: SheetRegion[];
   items: SheetItem[];
 }
+export interface SpringSheetItem {
+  type: 'spring'; name?: string; at?: TimeInput; target?: string;
+  from: MotionValueShape; to: MotionValueShape; velocity?: number | MotionValueShape;
+  stiffness?: number; damping?: number; mass?: number; restDelta?: number; restSpeed?: number; bounce?: number; duration?: TimeInput;
+}
+export interface InertiaSheetItem {
+  type: 'inertia'; name?: string; at?: TimeInput; target?: string;
+  from: number; velocity: number; power?: number; timeConstant?: number; min?: number; max?: number; restDelta?: number;
+}
 export interface ExtensionSheetItem { type: string; name?: string; at?: TimeInput; [key: string]: unknown; }
-export type SheetItem = TweenSheetItem | TrackSheetItem | TimelineSheetItem | ExtensionSheetItem;
+export type SheetItem = TweenSheetItem | TrackSheetItem | TimelineSheetItem | SpringSheetItem | InertiaSheetItem | ExtensionSheetItem;
 
 export interface CueSheet {
   $schema: 'dhaakon-motion/cue-sheet/1';
@@ -117,6 +127,16 @@ function buildItem(item: SheetItem, bindings: SheetBindings, strict: boolean, pa
   }
   if (item.type === 'timeline') {
     return buildTimeline(item as TimelineSheetItem, bindings, strict, path, rate);
+  }
+  if (item.type === 'spring') {
+    const spring_ = item as SpringSheetItem; const write = resolveTarget(spring_.target, bindings, strict, path);
+    const spring = new SpringItem({ ...spring_, frameRate: rate, onUpdate: write ? (value) => write(value) : undefined });
+    if (spring_.target) targetKeys.set(spring, spring_.target); return spring;
+  }
+  if (item.type === 'inertia') {
+    const inertia_ = item as InertiaSheetItem; const write = resolveTarget(inertia_.target, bindings, strict, path);
+    const inertia = new InertiaItem({ ...inertia_, onUpdate: write ? (value) => write(value) : undefined });
+    if (inertia_.target) targetKeys.set(inertia, inertia_.target); return inertia;
   }
   const built = bindings.createItem?.(item, { bindings, strict });
   if (built) return built;
@@ -222,6 +242,14 @@ function saveItem(item: TimelineItem, at: number): SheetItem {
       keyframes: item.keyframes.map((k) => ({ at: k.at, value: k.value })),
     };
   }
+  if (item instanceof SpringItem) {
+    const options = item.options as PhysicsSpringOptions<MotionValueShape>;
+    return { type: 'spring', ...(item.name ? { name: item.name } : {}), at, ...(target ? { target } : {}), from: item.from, to: item.to, velocity: item.initialVelocity, ...(options.stiffness != null ? { stiffness: options.stiffness } : {}), ...(options.damping != null ? { damping: options.damping } : {}), ...(options.mass != null ? { mass: options.mass } : {}), ...(options.restDelta != null ? { restDelta: options.restDelta } : {}), ...(options.restSpeed != null ? { restSpeed: options.restSpeed } : {}), ...(options.bounce != null ? { bounce: options.bounce } : {}), ...(options.duration != null ? { duration: options.duration } : {}) };
+  }
+  if (item instanceof InertiaItem) {
+    const options = item.options as InertiaOptions<number>;
+    return { type: 'inertia', ...(item.name ? { name: item.name } : {}), at, ...(target ? { target } : {}), from: item.from as number, velocity: item.initialVelocity as number, ...(options.power != null ? { power: options.power } : {}), ...(options.timeConstant != null ? { timeConstant: options.timeConstant } : {}), ...(options.min != null ? { min: options.min } : {}), ...(options.max != null ? { max: options.max } : {}), ...(options.restDelta != null ? { restDelta: options.restDelta } : {}) };
+  }
   return { type: item.kind, ...(item.name ? { name: item.name } : {}), at };
 }
 
@@ -283,6 +311,12 @@ function validateItem(item: unknown, path: string, push: (p: string, m: string) 
     if (value.frameRate != null) { try { frameRate(value.frameRate as FrameRateInput); } catch (err) { push(`${path}.frameRate`, (err as Error).message); } }
     if (!Array.isArray(value.items)) push(`${path}.items`, 'must be an array');
     else (value.items as unknown[]).forEach((child, index) => validateItem(child, `${path}.items[${index}]`, push));
+  } else if (value.type === 'spring') {
+    if (value.from === undefined) push(`${path}.from`, 'is required');
+    if (value.to === undefined) push(`${path}.to`, 'is required');
+  } else if (value.type === 'inertia') {
+    if (typeof value.from !== 'number') push(`${path}.from`, 'must be a number');
+    if (typeof value.velocity !== 'number') push(`${path}.velocity`, 'must be a number');
   }
 }
 
