@@ -8,6 +8,11 @@ import {
   type FrameRateInput, type TimeInput,
   captureScene, applyScene, type SceneState, type ApplySceneOptions,
 } from '@dhaakon/motion';
+import {
+  GestureArena, drag as bindDrag, hover as bindHover, longPressRecognizer, panRecognizer, pinchRecognizer,
+  press as bindPress, scrub as bindScrub, tapRecognizer, transformGesture,
+  type DragControls as CoreDragControls, type DragOptions, type GestureEvent, type Recognizer, type ScrubOptions, type TransformGestureOptions,
+} from '@dhaakon/motion/gesture';
 
 export type { MotionStyle };
 // Note: this entry's `Tween`/`Track` exports are the React components below (JSX elements), not the
@@ -96,28 +101,69 @@ type NativeProps<T extends React.ElementType> = Omit<React.ComponentPropsWithout
 export type MotionElementProps<T extends React.ElementType> = NativeProps<T> & {
   initial?: MotionStyle | false; animate?: MotionStyle; transition?: MotionTransition; style?: React.CSSProperties;
   whileInView?: MotionStyle; viewport?: InViewOptions;
+  whileHover?: MotionStyle; whileTap?: MotionStyle; whileDrag?: MotionStyle; whileFocus?: MotionStyle;
+  drag?: boolean | 'x' | 'y'; dragAxis?: DragOptions['axis']; dragBounds?: DragOptions['bounds']; dragElastic?: number | false; dragMomentum?: DragOptions['momentum']; dragSnap?: DragOptions['snap']; dragPropagation?: boolean; dragControls?: ReturnType<typeof useDragControls>;
+  onTap?: (event: GestureEvent<'tap'>) => void; onLongPress?: (event: GestureEvent<'longPress'>) => void;
+  onPanStart?: (event: GestureEvent<'pan'>) => void; onPan?: (event: GestureEvent<'pan'>) => void; onPanEnd?: (event: GestureEvent<'pan'>) => void; onPinch?: (event: GestureEvent<'pinch'>) => void;
+  onDragStart?: (event: GestureEvent<'pan'>) => void; onDrag?: (event: GestureEvent<'pan'>) => void; onDragEnd?: (event: GestureEvent<'pan'>) => void;
   onMotionStart?: () => void; onMotionComplete?: () => void; as?: React.ElementType;
 };
 
 export function createMotionComponent<T extends React.ElementType>(tag: T) {
   const Component = forwardRef<HTMLElement, MotionElementProps<any>>(function DhaakonMotionElement(rawProps, forwardedRef) {
-    const { as, initial, animate: target, whileInView, viewport, transition, style, onMotionStart, onMotionComplete, ...props } = rawProps as MotionElementProps<T>;
+    const { as, initial, animate: target, whileInView, viewport, transition, style,
+      whileHover, whileTap, whileDrag, whileFocus,
+      drag, dragAxis, dragBounds, dragElastic, dragMomentum, dragSnap, dragPropagation, dragControls,
+      onTap, onLongPress, onPanStart, onPan, onPanEnd, onPinch, onDragStart, onDrag, onDragEnd,
+      onMotionStart, onMotionComplete, ...props } = rawProps as MotionElementProps<T>;
     const localRef = useRef<HTMLElement | null>(null); const config = useContext(MotionContext); const reduced = useReducedMotion();
     const [inViewRef, inView] = useInView<HTMLElement>({ ...viewport, disabled: !whileInView });
-    const hasAnimated = useRef(false);
+    const hasAnimated = useRef(false); const visual = useRef<MotionStyle>({}); const interactionTween = useRef<CoreTween<MotionStyle> | null>(null);
     useImperativeHandle(forwardedRef, () => localRef.current as HTMLElement);
     const initialKey = stableKey(initial); const targetKey = stableKey(target); const viewKey = stableKey(whileInView);
-    useLayoutEffect(() => { if (localRef.current && initial) writeStyle(localRef.current, initial); }, [initialKey]);
+    useLayoutEffect(() => { if (localRef.current && initial) { visual.current = { ...initial }; writeStyle(localRef.current, initial); } }, [initialKey]);
     useEffect(() => {
       const node = localRef.current; const activeTarget = whileInView ? (inView ? whileInView : (initial || undefined)) : target;
       if (!node || !activeTarget) return;
       const from = hasAnimated.current || initial === false ? readStyle(node, activeTarget) : { ...(initial || readStyle(node, activeTarget)) };
       hasAnimated.current = true;
-      if (reduced) { writeStyle(node, activeTarget); onMotionComplete?.(); return; }
+      if (reduced) { visual.current = { ...visual.current, ...activeTarget }; writeStyle(node, activeTarget); onMotionComplete?.(); return; }
       const tween = new CoreTween<MotionStyle>({ frameRate: config.frameRate, ...config.transition, ...transition, from, to: activeTarget,
-        onStart: () => onMotionStart?.(), onUpdate: (value) => writeStyle(node, value), onComplete: () => onMotionComplete?.() }).play();
+        onStart: () => onMotionStart?.(), onUpdate: (value) => { visual.current = { ...visual.current, ...value }; writeStyle(node, visual.current); }, onComplete: () => onMotionComplete?.() }).play();
       return () => { tween.cancel(); };
     }, [initialKey, targetKey, viewKey, inView, reduced, config.frameRate, config.transition?.frameRate, transition?.frameRate, transition?.duration, transition?.delay, transition?.repeat, transition?.repeatDelay, transition?.yoyo, transition?.easing]);
+    const hoverKey = stableKey(whileHover); const tapKey = stableKey(whileTap); const dragKey = stableKey(whileDrag); const focusKey = stableKey(whileFocus); const boundsKey = stableKey(dragBounds); const snapKey = stableKey(dragSnap);
+    useEffect(() => {
+      const node = localRef.current; if (!node) return;
+      const base = () => whileInView && inView ? whileInView : target ?? (initial || {});
+      const animateInteraction = (state?: MotionStyle) => {
+        const next = { ...base(), ...(state ?? {}) }; interactionTween.current?.cancel();
+        if (reduced) { visual.current = { ...visual.current, ...next }; writeStyle(node, visual.current); return; }
+        interactionTween.current = new CoreTween<MotionStyle>({ ...config.transition, ...transition, from: { ...visual.current }, to: next, onUpdate: (value) => { visual.current = value; writeStyle(node, value); } }).play();
+      };
+      const disposers: Array<() => void> = [];
+      if (whileHover) { const binding = bindHover(node, { onChange: (active) => animateInteraction(active ? whileHover : undefined) }); disposers.push(binding.dispose); }
+      if (whileTap) { const binding = bindPress(node, { onChange: (active) => animateInteraction(active ? whileTap : undefined) }); disposers.push(binding.dispose); }
+      if (whileFocus) { const focus = () => animateInteraction(whileFocus); const blur = () => animateInteraction(); node.addEventListener('focus', focus); node.addEventListener('blur', blur); disposers.push(() => { node.removeEventListener('focus', focus); node.removeEventListener('blur', blur); }); }
+      if (onTap || onLongPress || onPanStart || onPan || onPanEnd || onPinch) {
+        const recognizers: Recognizer[] = [];
+        if (onTap) { const recognizer = tapRecognizer(); recognizer.subscribe(onTap); recognizers.push(recognizer); }
+        if (onLongPress) { const recognizer = longPressRecognizer(); recognizer.subscribe(onLongPress); recognizers.push(recognizer); }
+        if (onPanStart || onPan || onPanEnd) { const recognizer = panRecognizer({ axis: dragAxis }); recognizer.subscribe((event) => { if (event.phase === 'began') onPanStart?.(event); else if (event.phase === 'changed') onPan?.(event); else if (event.phase === 'ended') onPanEnd?.(event); }); recognizers.push(recognizer); }
+        if (onPinch) { const recognizer = pinchRecognizer(); recognizer.subscribe(onPinch); recognizers.push(recognizer); }
+        const arena = new GestureArena(node, recognizers); disposers.push(() => arena.dispose());
+      }
+      if (drag) {
+        const x = new MotionValue<number>(Number(visual.current.x ?? 0)); const y = new MotionValue<number>(Number(visual.current.y ?? 0));
+        const writeDrag = () => { visual.current = { ...visual.current, x: x.get(), y: y.get() }; writeStyle(node, visual.current); };
+        const ux = x.subscribe(writeDrag); const uy = y.subscribe(writeDrag);
+        const axis = dragAxis ?? (drag === true ? 'any' : drag);
+        const binding = bindDrag(axis === 'x' ? x : axis === 'y' ? y : { x, y }, node, { axis, bounds: dragBounds, elastic: dragElastic, momentum: dragMomentum, snap: dragSnap, propagate: dragPropagation,
+          onStart: (event) => { animateInteraction(whileDrag); onDragStart?.(event); }, onMove: (event) => onDrag?.(event), onEnd: (event) => { animateInteraction(); onDragEnd?.(event); } });
+        dragControls?._bind(binding); disposers.push(() => { dragControls?._unbind(binding); ux(); uy(); binding.dispose(); });
+      }
+      return () => { interactionTween.current?.cancel(); disposers.forEach((dispose) => dispose()); };
+    }, [hoverKey, tapKey, dragKey, focusKey, boundsKey, snapKey, Boolean(drag), dragAxis, dragElastic, dragMomentum, dragPropagation, reduced]);
     return React.createElement(as || tag, { ...props, style, ref: (node: HTMLElement | null) => { localRef.current = node; inViewRef.current = node; } });
   });
   return Component as React.ForwardRefExoticComponent<MotionElementProps<T> & React.RefAttributes<HTMLElement>>;
@@ -135,6 +181,30 @@ type MotionFactory = {
 };
 const cache = new Map<string, React.ComponentType<any>>();
 export const motion = new Proxy({} as MotionFactory, { get: (_, tag: string) => { if (!cache.has(tag)) cache.set(tag, createMotionComponent(tag as React.ElementType)); return cache.get(tag); } });
+
+export function useGesture<T extends Element>(ref: React.RefObject<T | null>, recognizers: Recognizer[]) {
+  const key = recognizers.map((recognizer) => recognizer.kind).join('|');
+  useEffect(() => { if (!ref.current) return; const arena = new GestureArena(ref.current, recognizers); return () => arena.dispose(); }, [ref, key]);
+}
+
+export function useDrag<T extends Element>(ref: React.RefObject<T | null>, target: MotionValue<number> | { x: MotionValue<number>; y: MotionValue<number> }, options: DragOptions = {}) {
+  const controls = useRef<CoreDragControls | null>(null); const key = stableKey(options);
+  useEffect(() => { if (!ref.current) return; controls.current = bindDrag(target, ref.current, options); return () => { controls.current?.dispose(); controls.current = null; }; }, [ref, target, key]);
+  return controls;
+}
+
+export function usePinch<T extends Element>(ref: React.RefObject<T | null>, options: TransformGestureOptions) { const key = stableKey(options); useEffect(() => { if (!ref.current) return; const binding = transformGesture(ref.current, options); return binding.dispose; }, [ref, key]); }
+export function useScrub<T extends Element>(ref: React.RefObject<T | null>, transport?: CoreTransport, options: ScrubOptions = {}) { const inherited = useContext(TransportContext); const active = transport ?? inherited; const key = stableKey(options); useEffect(() => { if (!ref.current || !active) return; const binding = bindScrub(active, ref.current, options); return binding.dispose; }, [ref, active, key]); }
+
+export interface ReactDragControls { start(event: PointerEvent): void; cancel(): void; _bind(control: CoreDragControls): void; _unbind(control: CoreDragControls): void }
+export function useDragControls(): ReactDragControls {
+  const active = useRef<CoreDragControls | null>(null);
+  return useMemo(() => ({ start: (event: PointerEvent) => active.current?.start(event), cancel: () => active.current?.cancel(), _bind: (control: CoreDragControls) => { active.current = control; }, _unbind: (control: CoreDragControls) => { if (active.current === control) active.current = null; } }), []);
+}
+
+export function useVelocity<T extends MotionValueShape>(value: MotionValue<T>) { const output = useMotionValue<T | number>(value.velocity as T | number); useEffect(() => value.subscribe(() => output.set(value.velocity as T | number)), [value, output]); return output; }
+export function useIsPressed<T extends Element>(ref: React.RefObject<T | null>) { const state = useMotionValue<boolean>(false); useEffect(() => { if (!ref.current) return; const binding = bindPress(ref.current, { onChange: (value) => state.set(value) }); return binding.dispose; }, [ref, state]); return useMotionValueState(state); }
+export function useIsHovered<T extends Element>(ref: React.RefObject<T | null>) { const state = useMotionValue<boolean>(false); useEffect(() => { if (!ref.current) return; const binding = bindHover(ref.current, { onChange: (value) => state.set(value) }); return binding.dispose; }, [ref, state]); return useMotionValueState(state); }
 
 export interface RevealProps extends Omit<MotionElementProps<'div'>, 'initial' | 'animate' | 'whileInView' | 'viewport'> {
   from?: MotionStyle; to?: MotionStyle; once?: boolean; amount?: InViewOptions['amount']; margin?: string;

@@ -16,6 +16,6 @@ export default defineConfig({
   clean: true,
   splitting: false,
   sourcemap: true,
-  external: ['@dhaakon/motion', 'react', 'react-dom', 'react/jsx-runtime', 'three'],
+  external: ['@dhaakon/motion', '@dhaakon/motion/gesture', 'react', 'react-dom', 'react/jsx-runtime', 'three'],
   outExtension({ format }) { return { js: format === 'cjs' ? '.cjs' : '.js' }; },
 });
