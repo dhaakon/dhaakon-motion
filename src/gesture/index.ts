@@ -4,3 +4,4 @@ export * from './recognizers';
 export * from './arena';
 export * from './keyboard';
 export * from './bind';
+export * from './record';

@@ -3,6 +3,8 @@ import { Tween } from './core';
 import type { MotionValueShape } from './interpolate';
 import { Timeline } from './timeline';
 import { frameRate, parseTime, type FrameRateInput, type TimeInput } from './time';
+import { replay, type GestureRecording } from './gesture/record';
+import { MotionValue } from './core';
 
 /**
  * A fully controllable `FrameDriver`: nothing runs until `step`/`advance` is
@@ -209,6 +211,19 @@ export async function fling(element: Element, options: { from: [number, number];
   for (let index = 1; index <= frames; index += 1) { const t = duration * index / frames; stream.move(options.from[0] + options.velocity[0] * t, options.from[1] + options.velocity[1] * t, t); }
   stream.up(undefined, undefined, duration);
 }
+
+export const replayGesture = replay;
+
+/** Measure event-to-MotionValue-write latency. Dispatch a pointer event after calling this; it resolves on the next value write. */
+export function measureLatency<T extends MotionValueShape>(element: Element, motionValue: MotionValue<T>): Promise<{ eventToWrite: number; eventToPaint?: number }> {
+  return new Promise((resolve) => {
+    let eventTime = 0; let removeValue = () => {};
+    const onEvent = (event: Event) => { eventTime = event.timeStamp; removeValue = motionValue.subscribe(() => { const writeTime = globalThis.performance?.now?.() ?? Date.now(); removeValue(); element.removeEventListener('pointermove', onEvent); resolve({ eventToWrite: Math.max(0, writeTime - eventTime) }); }); };
+    element.addEventListener('pointermove', onEvent, { once: true });
+  });
+}
+
+export type { GestureRecording };
 
 // ---- Web Audio / Web MIDI fakes --------------------------------------------
 // jsdom and node have neither API; these are minimal stand-ins for testing
