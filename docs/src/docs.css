@@ -261,3 +261,12 @@ footer { min-height:110px; padding:30px 4vw; display:flex; align-items:flex-end;
 .show-code { border-top:1px solid rgba(240,238,232,.3); }.show-code summary { padding:17px 20px; display:flex; justify-content:space-between; cursor:pointer; color:#f0eee8; font:600 9px var(--dhk-font-mono); letter-spacing:.1em; list-style:none; }.show-code summary::-webkit-details-marker{display:none}.show-code summary span { color:#ff8a5e; }.show-code .code { border:0; border-top:1px solid rgba(240,238,232,.25); }.show-code .code pre { max-height:420px; }
 @media (max-width:850px){.showstopper-example>header{align-items:flex-start;flex-direction:column}.showstopper-badges{justify-content:flex-start}.show-viewport{height:390px}.show-hud{grid-template-columns:repeat(2,1fr)}.show-hud>div:nth-child(2){border-right:0}.show-hud>div:nth-child(-n+2){border-bottom:1px solid rgba(240,238,232,.2)}}
 @media (max-width:560px){.showstopper-example>header{padding:20px}.show-viewport{height:355px}.show-topline{grid-template-columns:1fr auto;padding-inline:12px}.show-topline>b{display:none}.show-title{left:20px;top:78px}.show-waveform{right:12px;top:auto;bottom:55px;width:160px;height:54px}.show-targets{left:12px;right:12px;bottom:10px;justify-content:flex-start}.show-controls{padding-inline:12px}.show-diagnostics{grid-template-columns:1fr}.show-diagnostics span{display:none}}
+
+/* ---- ambient shader backgrounds ----------------------------------
+ * The canvas sits above the section's own background and below every
+ * piece of its content, without any content element needing to know:
+ * `isolation` makes the section a stacking context, so a z-index of -1
+ * lands between the two. */
+.section { position: relative; isolation: isolate; }
+.ambient-shader { position:absolute; inset:0; z-index:-1; display:block; width:100%; height:100%; pointer-events:none; transition:opacity 900ms cubic-bezier(.16,1,.3,1); }
+@media (prefers-reduced-motion:reduce){ .ambient-shader { transition:none; } }
