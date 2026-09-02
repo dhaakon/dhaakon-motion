@@ -9,7 +9,7 @@ Frame-native tween authoring and a complete production-control documentation sui
 - `Tween` timing fields `duration`, `delay`, and `repeatDelay` now accept the complete `TimeInput` vocabulary: milliseconds, seconds, frames, and SMPTE timecode.
 - `TweenOptions.frameRate` provides an explicit local timebase. Otherwise a tween inherits its containing `Timeline`/`Transport` rate and re-resolves authored timing when attached; an explicit tween or nested-timeline rate always wins.
 - `Track.repeatDelay`, `Timeline.repeatDelay`, React `MotionTransition`, declarative `<Tween>`, and `<Sequence repeatDelay>` use the same time vocabulary. `MotionConfig` can provide a frame rate for standalone React motion.
-- Documentation now contains seven large live production labs covering SMPTE/frame control, deterministic offline passes, nested cue orchestration, unified DOM/Three.js/Canvas/audio/hardware output, React lifecycle, serializable cue sheets/scene state, and timeline testing/inspection.
+- Documentation now contains a flagship all-system virtual-production take plus seven focused live labs covering SMPTE/frame control, deterministic offline passes, nested cue orchestration, unified DOM/Three.js/Canvas/audio/hardware output, React lifecycle, serializable cue sheets/scene state, and timeline testing/inspection.
 
 ### Changed
 

@@ -9,6 +9,37 @@ import {
 } from './ProductionLabs';
 
 const ThreeShowcase = lazy(() => import('./ThreeShowcase').then((module) => ({ default: module.ThreeShowcase })));
+const ShowstopperLab = lazy(() => import('./ShowstopperLab').then((module) => ({ default: module.ShowstopperLab })));
+
+const showstopperCode = `// One portable show file is the source of truth.
+const timeline = loadSheet(showSheet, {
+  targets: { camera, rig, energy, exposure, overlay, audio },
+  cues: { take: routeSwitcher, black: blackout }
+});
+
+const transport = new Transport({
+  root: timeline, frameRate: 24, snap: true,
+  loop: ['0f', '144f']
+});
+
+transport.attach(threeOutput({ renderer, scene, camera }));
+transport.attach(drawOutput(drawAudioScope));
+transport.attach(audioOutput(audioContext));
+transport.attach(signalOutput(sendOSC));
+transport.attach(midiOutput(midiPort));
+const trace = transport.trace({ capacity: 240 });
+
+// React owns lifecycle and controls, not the frame loop.
+<Transport transport={transport}>
+  <ProgramMonitor />
+  <FrameControls />
+  <TimelineInspector trace={trace} />
+</Transport>
+
+// The same cue sheet renders without a wall clock.
+await renderFrames(loadSheet(showSheet, bindings), captureFrame, {
+  frameRate: 24, to: '144f'
+});`;
 
 const tweenCode = `import { Tween, Easing } from '@dhaakon/motion';
 
@@ -422,7 +453,16 @@ function CueSheetExample() {
 function ComplexExample({ number, title, description, code, delay = 0, children }: { number: string; title: string; description: string; code: string; delay?: number; children: React.ReactNode }) {
   const compact = number === '06.1';
   const copy = compact ? 'Author in frames or SMPTE. The 29.97 DF Transport handles conversion, cues, scrubbing, and exact frame steps.' : description;
-  return <Reveal as="article" className={`complex-example${compact ? ' complex-example--compact' : ''}`} from={{ y: 38, opacity: 0 }} amount={0.08} transition={{ duration: 600, delay }}><header><span>[ {number} ]</span><h3>{title}</h3><p>{copy}</p><Badge tone="accent">React + TypeScript</Badge></header><div className="complex-body"><div className="complex-live">{children}</div><Code>{code}</Code></div></Reveal>;
+  const card = <Reveal as="article" className={`complex-example${compact ? ' complex-example--compact' : ''}`} from={{ y: 38, opacity: 0 }} amount={0.08} transition={{ duration: 600, delay }}><header><span>[ {number} ]</span><h3>{title}</h3><p>{copy}</p><Badge tone="accent">React + TypeScript</Badge></header><div className="complex-body"><div className="complex-live">{children}</div><Code>{code}</Code></div></Reveal>;
+  return compact ? <><ShowstopperExample/>{card}</> : card;
+}
+
+function ShowstopperExample() {
+  return <Reveal as="article" className="showstopper-example" from={{ y: 42, opacity: 0 }} amount={0.04} transition={{ duration: 700 }}>
+    <header><div><span>[ 06.0 / FLAGSHIP COMPOSITION ]</span><h3>Stage 12: The Impossible Take</h3><p>One cue sheet. One frame-locked transport. Every renderer and production signal moves as a single, inspectable show.</p></div><div className="showstopper-badges">{['SMPTE','THREE.JS','REACT','CANVAS','AUDIO','HARDWARE','OFFLINE'].map((label) => <Badge tone="accent" key={label}>{label}</Badge>)}</div></header>
+    <Suspense fallback={<div className="show-loading">INITIALIZING THE STAGE…</div>}><ShowstopperLab/></Suspense>
+    <details className="show-code"><summary>View the integrated composition <span>React + TypeScript ↘</span></summary><Code>{showstopperCode}</Code></details>
+  </Reveal>;
 }
 
 function Demo({ title, note, children }: { title: string; note: string; children: React.ReactNode }) {
