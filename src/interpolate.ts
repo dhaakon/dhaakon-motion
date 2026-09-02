@@ -1,4 +1,4 @@
-export type MotionPrimitive = number | string;
+export type MotionPrimitive = number | string | boolean;
 // The object arm allows `| undefined` per key so a plain interface with optional properties
 // (e.g. `{ position?: [number, number, number]; scale?: number }`) satisfies this structurally —
 // `interpolate`'s object branch already treats a missing/undefined key on either side as "keep
