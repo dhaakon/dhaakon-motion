@@ -150,6 +150,66 @@ export function expectSample(timeline: Timeline, at: TimeInput, expected: Record
   }
 }
 
+// ---- Pointer Events --------------------------------------------------------
+
+export interface TestPointerOptions { id?: number; type?: 'mouse' | 'touch' | 'pen'; coalesced?: Array<[number, number, number]> }
+
+/** Install the small PointerEvent/pointer-capture surface jsdom lacks. Feature-detected and safe in browsers. */
+export function installPointerEvents(): () => void {
+  const scope = globalThis as typeof globalThis & { PointerEvent?: typeof PointerEvent };
+  const previous = scope.PointerEvent;
+  const elementPrototype = globalThis.Element?.prototype as (Element & { setPointerCapture?: (id: number) => void; releasePointerCapture?: (id: number) => void; hasPointerCapture?: (id: number) => boolean }) | undefined;
+  const previousSet = elementPrototype?.setPointerCapture; const previousRelease = elementPrototype?.releasePointerCapture; const previousHas = elementPrototype?.hasPointerCapture;
+  if (!scope.PointerEvent) {
+    class TestPointerEvent extends MouseEvent {
+      readonly pointerId: number; readonly pointerType: string; readonly pressure: number; readonly isPrimary: boolean;
+      constructor(type: string, init: PointerEventInit = {}) { super(type, init); this.pointerId = init.pointerId ?? 1; this.pointerType = init.pointerType ?? 'mouse'; this.pressure = init.pressure ?? 0; this.isPrimary = init.isPrimary ?? true; }
+      getCoalescedEvents() { return [this as unknown as PointerEvent]; }
+      getPredictedEvents() { return []; }
+    }
+    scope.PointerEvent = TestPointerEvent as unknown as typeof PointerEvent;
+  }
+  const captures = new WeakMap<Element, Set<number>>();
+  if (elementPrototype && !elementPrototype.setPointerCapture) elementPrototype.setPointerCapture = function (id: number) { const set = captures.get(this) ?? new Set(); set.add(id); captures.set(this, set); };
+  if (elementPrototype && !elementPrototype.releasePointerCapture) elementPrototype.releasePointerCapture = function (id: number) { captures.get(this)?.delete(id); };
+  if (elementPrototype && !elementPrototype.hasPointerCapture) elementPrototype.hasPointerCapture = function (id: number) { return captures.get(this)?.has(id) ?? false; };
+  return () => {
+    if (previous) scope.PointerEvent = previous; else Reflect.deleteProperty(scope, 'PointerEvent');
+    if (elementPrototype) { elementPrototype.setPointerCapture = previousSet!; elementPrototype.releasePointerCapture = previousRelease!; elementPrototype.hasPointerCapture = previousHas!; }
+  };
+}
+
+/** Deterministic synthetic pointer stream used by gesture tests. */
+export function pointer(element: Element, options: TestPointerOptions = {}) {
+  const id = options.id ?? 1; const type = options.type ?? 'touch'; let last = { x: 0, y: 0, t: 0 };
+  const dispatch = (kind: 'down' | 'move' | 'up' | 'cancel', x: number, y: number, t: number) => {
+    last = { x, y, t };
+    const name = `pointer${kind === 'cancel' ? 'cancel' : kind}`;
+    const event = new PointerEvent(name, { bubbles: true, cancelable: true, pointerId: id, pointerType: type, clientX: x, clientY: y, button: 0, buttons: kind === 'up' || kind === 'cancel' ? 0 : 1, isPrimary: id === 1 });
+    Object.defineProperty(event, 'timeStamp', { value: t });
+    if (options.coalesced?.length && kind === 'move') Object.defineProperty(event, 'getCoalescedEvents', { value: () => options.coalesced!.map(([cx, cy, ct]) => { const sample = new PointerEvent('pointermove', { pointerId: id, pointerType: type, clientX: cx, clientY: cy, buttons: 1 }); Object.defineProperty(sample, 'timeStamp', { value: ct }); return sample; }) });
+    element.dispatchEvent(event); return event;
+  };
+  return {
+    down(x: number, y: number, t = 0) { return dispatch('down', x, y, t); },
+    move(x: number, y: number, t = last.t + 16) { return dispatch('move', x, y, t); },
+    up(x = last.x, y = last.y, t = last.t + 16) { return dispatch('up', x, y, t); },
+    cancel() { return dispatch('cancel', last.x, last.y, last.t); },
+  };
+}
+
+export async function stroke(element: Element, points: Array<[number, number, number]>, options: TestPointerOptions = {}) {
+  if (!points.length) return; const stream = pointer(element, options); stream.down(...points[0]);
+  points.slice(1).forEach(([x, y, t]) => stream.move(x, y, t)); const last = points.at(-1)!; stream.up(last[0], last[1], last[2]);
+}
+
+export async function fling(element: Element, options: { from: [number, number]; velocity: [number, number]; duration?: number; id?: number; type?: 'mouse' | 'touch' | 'pen' }) {
+  const duration = options.duration ?? 96; const frames = Math.max(2, Math.round(duration / 16)); const stream = pointer(element, { id: options.id, type: options.type });
+  stream.down(options.from[0], options.from[1], 0);
+  for (let index = 1; index <= frames; index += 1) { const t = duration * index / frames; stream.move(options.from[0] + options.velocity[0] * t, options.from[1] + options.velocity[1] * t, t); }
+  stream.up(undefined, undefined, duration);
+}
+
 // ---- Web Audio / Web MIDI fakes --------------------------------------------
 // jsdom and node have neither API; these are minimal stand-ins for testing
 // ./audio and ./midi compositions without a real browser.

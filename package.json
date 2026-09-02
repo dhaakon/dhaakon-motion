@@ -47,6 +47,11 @@
       "types": "./dist/devtools.d.ts",
       "import": "./dist/devtools.js",
       "require": "./dist/devtools.cjs"
+    },
+    "./gesture": {
+      "types": "./dist/gesture.d.ts",
+      "import": "./dist/gesture.js",
+      "require": "./dist/gesture.cjs"
     }
   },
   "publishConfig": {

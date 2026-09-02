@@ -11,6 +11,7 @@ const alias = [
   { find: /^@dhaakon\/motion\/midi$/, replacement: resolve(src, 'midi.ts') },
   { find: /^@dhaakon\/motion\/testing$/, replacement: resolve(src, 'testing.ts') },
   { find: /^@dhaakon\/motion\/devtools$/, replacement: resolve(src, 'devtools.ts') },
+  { find: /^@dhaakon\/motion\/gesture$/, replacement: resolve(src, 'gesture/index.ts') },
   { find: /^@dhaakon\/motion$/, replacement: resolve(src, 'index.ts') },
 ];
 

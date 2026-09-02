@@ -9,6 +9,7 @@ export default defineConfig({
     midi: 'src/midi.ts',
     testing: 'src/testing.ts',
     devtools: 'src/devtools.ts',
+    gesture: 'src/gesture/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,

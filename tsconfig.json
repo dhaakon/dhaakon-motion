@@ -12,6 +12,7 @@
       "@dhaakon/motion/midi": ["src/midi.ts"],
       "@dhaakon/motion/testing": ["src/testing.ts"],
       "@dhaakon/motion/devtools": ["src/devtools.ts"]
+      ,"@dhaakon/motion/gesture": ["src/gesture/index.ts"]
     }
   },
   "include": ["src", "docs", "tests"]
