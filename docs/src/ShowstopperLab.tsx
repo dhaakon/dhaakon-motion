@@ -39,30 +39,30 @@ const showSheet: CueSheet = {
   items: [
     {
       type: 'timeline', name: 'VIRTUAL CAMERA + LED VOLUME', at: '0f', items: [
-        { type: 'track', name: 'camera-path', target: 'camera', keyframes: [
+        { type: 'track', name: 'camera-path', target: 'camera', at: '0f', keyframes: [
           { at: '0f', value: { position: [0, 1.1, 8.6], fov: 46 } },
           { at: '48f', value: { position: [-2.5, 1.8, 6.2], fov: 38 }, easing: 'dhaakon' },
           { at: '96f', value: { position: [2.1, .55, 5.1], fov: 31 }, easing: 'easeInOutCubic' },
           { at: '144f', value: { position: [0, 1.2, 7.4], fov: 44 }, easing: 'dhaakon' },
         ] },
-        { type: 'track', name: 'scene-rig', target: 'rig', keyframes: [
+        { type: 'track', name: 'scene-rig', target: 'rig', at: '0f', keyframes: [
           { at: '0f', value: { rotation: [0, 0, 0], scale: .72 } },
           { at: '72f', value: { rotation: [.5, 3.2, .15], scale: 1.08 }, easing: 'dhaakon' },
           { at: '144f', value: { rotation: [.1, 6.28, 0], scale: .78 }, easing: 'easeInOutCubic' },
         ] },
-        { type: 'track', name: 'volume-energy', target: 'energy', keyframes: [
+        { type: 'track', name: 'volume-energy', target: 'energy', at: '0f', keyframes: [
           { at: '0f', value: .08 }, { at: '24f', value: .22 },
           { at: '72f', value: 1, easing: 'easeOutBack' }, { at: '132f', value: .12 },
         ] },
-        { type: 'track', name: 'exposure', target: 'exposure', keyframes: [
+        { type: 'track', name: 'exposure', target: 'exposure', at: '0f', keyframes: [
           { at: '0f', value: .72 }, { at: '72f', value: 1.36 }, { at: '144f', value: .8 },
         ] },
       ],
     },
     {
       type: 'timeline', name: 'GRAPHICS + SOUND', at: '18f', items: [
-        { type: 'tween', name: 'title-in', target: 'overlay', from: 0, to: 1, delay: '6f', duration: '24f', repeat: 1, repeatDelay: '54f', yoyo: true, easing: 'dhaakon' },
-        { type: 'track', name: 'audio-envelope', target: 'audio', keyframes: [
+        { type: 'tween', name: 'title-in', target: 'overlay', at: '0f', from: 0, to: 1, delay: '6f', duration: '24f', repeat: 1, repeatDelay: '54f', yoyo: true, easing: 'dhaakon' },
+        { type: 'track', name: 'audio-envelope', target: 'audio', at: '0f', keyframes: [
           { at: '0f', value: 0 }, { at: '12f', value: .15 }, { at: '54f', value: .92 }, { at: '114f', value: 0 },
         ] },
       ],
@@ -102,7 +102,7 @@ function ControlSurface({ enableAudio, verify, offlineHash, packet, trace }: {
       <div><small>TRANSPORT</small><strong>{state.state.toUpperCase()}</strong></div>
       <div><small>OFFLINE HASH</small><strong>{offlineHash || 'NOT RUN'}</strong></div>
     </div>
-    <div className="show-scrub"><i style={{ transform: `scaleX(${playhead.progress})` }}/>{transport.root.markers.map((marker) => <button key={marker.name} style={{ left: `${marker.time / transport.duration * 100}%` }} onClick={() => transport.seek(marker.time)} title={marker.name}/>)}</div>
+    <div className="show-scrub"><i style={{ transform: `scaleX(${playhead.progress})` }}/><input aria-label="Scrub show timeline" type="range" min={0} max={1000} value={Math.round(playhead.progress * 1000)} onChange={(event) => transport.seek((Number(event.target.value) / 1000) * transport.duration)}/>{transport.root.markers.map((marker) => <button key={marker.name} style={{ left: `${marker.time / transport.duration * 100}%` }} onClick={() => transport.seek(marker.time)} title={marker.name}/>)}</div>
     <div className="show-controls">
       <Button variant="accent" size="sm" onClick={() => transport.toggle()}>{state.state === 'playing' ? 'Pause take' : 'Roll take'}</Button>
       <Button variant="outline" size="sm" onClick={() => transport.step(-1)}>−1f</Button>

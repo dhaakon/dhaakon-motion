@@ -330,12 +330,19 @@ export function usePlayhead(options: { fps?: number } = {}): { time: number; fra
   useEffect(() => {
     const minInterval = 1000 / fps;
     let last = 0;
-    return transport.subscribe(() => {
-      const now = globalThis.performance?.now?.() ?? Date.now();
-      if (now - last < minInterval) return;
-      last = now;
+    let trailing: ReturnType<typeof setTimeout> | undefined;
+    const publish = () => {
+      trailing = undefined;
+      last = globalThis.performance?.now?.() ?? Date.now();
       setSnapshot({ time: transport.time, frame: transport.frame, timecode: transport.timecode, progress: transport.progress });
+    };
+    const unsubscribe = transport.subscribe(() => {
+      const now = globalThis.performance?.now?.() ?? Date.now();
+      const remaining = minInterval - (now - last);
+      if (remaining <= 0) { if (trailing) clearTimeout(trailing); publish(); return; }
+      if (!trailing) trailing = setTimeout(publish, remaining);
     });
+    return () => { unsubscribe(); if (trailing) clearTimeout(trailing); };
   }, [transport, fps]);
   return snapshot;
 }

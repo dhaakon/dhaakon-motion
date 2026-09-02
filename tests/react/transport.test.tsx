@@ -201,6 +201,25 @@ test('a controlled `paused` prop toggles play/pause reactively', async () => {
   expect(transport.state).toBe('playing');
 });
 
+test('usePlayhead publishes a trailing update for rapid paused seeks', async () => {
+  const { scheduler } = createTestScheduler();
+  const transport = new CoreTransport({ scheduler, duration: 1000, frameRate: 24 });
+
+  function Readout() {
+    const playhead = usePlayhead({ fps: 30 });
+    return <output data-testid="frame">{playhead.frame}</output>;
+  }
+
+  const view = render(<Transport transport={transport}><Readout /></Transport>);
+  await flush();
+  act(() => {
+    transport.seekFrame(1);
+    transport.seekFrame(2);
+  });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 45)); });
+  expect(view.getByTestId('frame').textContent).toBe('2');
+});
+
 test('usePlayhead updates at no more than `fps` React renders per second', async () => {
   const { driver, scheduler } = createTestScheduler();
   const transport = new CoreTransport({ scheduler, duration: 10_000 });

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1
+
+### Fixed
+
+- `usePlayhead()` now schedules a trailing publication when rapid seeks or frame steps are throttled. A final update while paused is no longer dropped just because it occurs inside the hook's FPS interval.
+- The flagship Impossible Take cue-sheet channels now explicitly overlap at `0f` instead of falling into sequential placement. Its visible six-second timeline matches its loop range, marker controls, and offline render range.
+- The flagship timeline is now directly draggable, while marker diamonds remain independently clickable.
+
 ## 0.5.0
 
 Frame-native tween authoring and a complete production-control documentation suite.
