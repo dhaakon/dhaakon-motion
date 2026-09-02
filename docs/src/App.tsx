@@ -7,6 +7,7 @@ import {
   InspectionLab, MultiOutputLab, NestedCueLab, OfflineRenderLab, ReactLifecycleLab,
   SerializableShowLab, TimecodeConformLab, productionLabCode,
 } from './ProductionLabs';
+import { HeroMotionGraphic } from './HeroMotionGraphic';
 
 const ThreeShowcase = lazy(() => import('./ThreeShowcase').then((module) => ({ default: module.ThreeShowcase })));
 const ShowstopperLab = lazy(() => import('./ShowstopperLab').then((module) => ({ default: module.ShowstopperLab })));
@@ -514,7 +515,7 @@ export function App({ version }: { version: string }) {
 }
 
 function HeroOrbit() {
-  return <div className="hero-art"><div className="orbit orbit-a"/><div className="orbit orbit-b"/><motion.div className="hero-core" initial={{ rotate: 0, scale: .92 }} animate={{ rotate: 360, scale: 1 }} transition={{ duration: 9000, easing: 'linear', repeat: Infinity }}><span>DM</span></motion.div><p><b>FRAME</b><br/>SYNCHRONIZED</p></div>;
+  return <HeroMotionGraphic/>;
 }
 function SectionTitle({ number, title, subtitle }: { number: string; title: string; subtitle: string }) { return <Reveal as="header" className="section-title" from={{ y: 30, opacity: 0 }} amount={0.35}><p>[ {number} ]</p><div><h2>{title} ↘</h2><p>{subtitle}</p></div></Reveal>; }
 function Api({ index, name, text }: { index: number; name: string; text: string }) { return <Reveal as="article" from={{ y: 22, opacity: 0 }} amount={0.35} transition={{ delay: index * 55 }}><span>+</span><h3>{name}</h3><p>{text}</p></Reveal>; }
