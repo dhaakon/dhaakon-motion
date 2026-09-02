@@ -15,7 +15,7 @@ import { Fragment, jsx } from "react/jsx-runtime";
 var MotionContext = createContext({ reducedMotion: "user" });
 function MotionConfig({ children, ...value }) {
   const parent = useContext(MotionContext);
-  return /* @__PURE__ */ jsx(MotionContext.Provider, { value: useMemo(() => ({ ...parent, ...value, transition: { ...parent.transition, ...value.transition } }), [parent, value.transition, value.reducedMotion]), children });
+  return /* @__PURE__ */ jsx(MotionContext.Provider, { value: useMemo(() => ({ ...parent, ...value, transition: { ...parent.transition, ...value.transition } }), [parent, value.transition, value.reducedMotion, value.frameRate]), children });
 }
 function useReducedMotion() {
   const setting = useContext(MotionContext).reducedMotion;
@@ -65,16 +65,17 @@ function useTween(from, to, options = {}) {
   const motionValue = useMotionValue(from);
   const tween = useRef(null);
   const reduced = useReducedMotion();
-  const transition = useContext(MotionContext).transition;
+  const config = useContext(MotionContext);
+  const transition = config.transition;
   const fromKey = stableKey(from);
   const toKey = stableKey(to);
   useEffect(() => {
     motionValue.set(from);
-    tween.current = motionValue.animate(to, { ...transition, ...options, duration: reduced ? 0 : options.duration ?? transition?.duration });
+    tween.current = motionValue.animate(to, { frameRate: config.frameRate, ...transition, ...options, duration: reduced ? 0 : options.duration ?? transition?.duration });
     return () => {
       tween.current?.cancel();
     };
-  }, [motionValue, fromKey, toKey, reduced, options.duration, options.delay, options.repeat, options.repeatDelay, options.yoyo, options.easing, options.ease]);
+  }, [motionValue, fromKey, toKey, reduced, config.frameRate, transition?.frameRate, options.frameRate, options.duration, options.delay, options.repeat, options.repeatDelay, options.yoyo, options.easing, options.ease]);
   return { value: useMotionValueState(motionValue), motionValue, controls: tween };
 }
 function useTimeline(factory, dependencies = []) {
@@ -119,6 +120,7 @@ function createMotionComponent(tag) {
         return;
       }
       const tween = new CoreTween({
+        frameRate: config.frameRate,
         ...config.transition,
         ...transition,
         from,
@@ -130,7 +132,7 @@ function createMotionComponent(tag) {
       return () => {
         tween.cancel();
       };
-    }, [initialKey, targetKey, viewKey, inView, reduced, transition?.duration, transition?.delay, transition?.repeat, transition?.repeatDelay, transition?.yoyo, transition?.easing]);
+    }, [initialKey, targetKey, viewKey, inView, reduced, config.frameRate, config.transition?.frameRate, transition?.frameRate, transition?.duration, transition?.delay, transition?.repeat, transition?.repeatDelay, transition?.yoyo, transition?.easing]);
     return React.createElement(as || tag, { ...props, style, ref: (node) => {
       localRef.current = node;
       inViewRef.current = node;

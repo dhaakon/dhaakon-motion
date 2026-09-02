@@ -420,25 +420,51 @@ function parseTime(input, rate) {
 var Track = class {
   kind = "track";
   name;
-  keyframes;
+  resolvedKeyframes = [];
+  authoredKeyframes;
   segments = [];
   apply;
   repeat;
   repeatDelay;
+  repeatDelayInput;
   direction;
+  explicitRateInput;
+  inheritedRateInput;
+  defaultEasing;
   constructor(options) {
     if (!options.apply && !options.target) throw new Error("Track needs either `apply` or `target`.");
     this.name = options.name;
     this.apply = options.apply ?? ((value) => options.target.set(value));
     this.repeat = options.repeat ?? 0;
-    this.repeatDelay = options.repeatDelay ?? 0;
+    this.repeatDelayInput = options.repeatDelay ?? 0;
+    this.repeatDelay = 0;
     this.direction = options.direction ?? "normal";
+    this.explicitRateInput = options.frameRate;
+    this.defaultEasing = options.easing;
+    this.authoredKeyframes = options.keyframes.map((key) => ({ ...key }));
     if (!options.keyframes.length) throw new Error("Track needs at least one keyframe.");
-    const rate = options.frameRate ? frameRate(options.frameRate) : void 0;
-    const resolved = options.keyframes.map((key) => ({ at: typeof key.at === "number" ? key.at : parseTime(key.at, rate), value: key.value, easing: key.easing })).sort((a, b) => a.at - b.at);
-    this.keyframes = resolved.map(({ at, value }) => ({ at, value }));
+    this.resolveTiming();
+  }
+  get keyframes() {
+    return this.resolvedKeyframes;
+  }
+  get frameRate() {
+    const authored = [...this.authoredKeyframes.map((keyframe) => keyframe.at), this.repeatDelayInput];
+    const provisional = authored.some((input) => typeof input === "string" && input.includes(";")) ? "29.97df" : 60;
+    return frameRate(this.explicitRateInput ?? this.inheritedRateInput ?? provisional);
+  }
+  bindFrameRate(rate) {
+    this.inheritedRateInput = rate;
+    this.resolveTiming();
+  }
+  resolveTiming() {
+    const rate = this.frameRate;
+    const resolved = this.authoredKeyframes.map((key) => ({ at: parseTime(key.at, rate), value: key.value, easing: key.easing })).sort((a, b) => a.at - b.at);
+    this.resolvedKeyframes = resolved.map(({ at, value }) => ({ at, value }));
+    this.repeatDelay = Math.max(0, parseTime(this.repeatDelayInput, rate));
+    this.segments = [];
     for (let i = 1; i < resolved.length; i += 1) {
-      this.segments.push({ from: resolved[i - 1].at, to: resolved[i].at, ease: resolveEasing(resolved[i].easing ?? options.easing) });
+      this.segments.push({ from: resolved[i - 1].at, to: resolved[i].at, ease: resolveEasing(resolved[i].easing ?? this.defaultEasing) });
     }
   }
   /** Content length: the last keyframe's time. */
@@ -506,6 +532,11 @@ var Tween = class {
   value = this.from;
   progress = 0;
   elapsed = 0;
+  durationInput = 300;
+  delayInput = 0;
+  repeatDelayInput = 0;
+  explicitRateInput;
+  inheritedRateInput;
   frameLoop = scheduler;
   startedAt = 0;
   removeFrame;
@@ -517,7 +548,13 @@ var Tween = class {
     if (options.autoplay) queueMicrotask(() => this.play());
   }
   configure(options) {
-    for (const [key, value] of Object.entries(options)) if (value !== void 0) this[key] = value;
+    const timingKeys = /* @__PURE__ */ new Set(["duration", "delay", "repeatDelay", "frameRate"]);
+    for (const [key, value] of Object.entries(options)) if (value !== void 0 && !timingKeys.has(key)) this[key] = value;
+    if (options.duration !== void 0) this.durationInput = options.duration;
+    if (options.delay !== void 0) this.delayInput = options.delay;
+    if (options.repeatDelay !== void 0) this.repeatDelayInput = options.repeatDelay;
+    if (options.frameRate !== void 0) this.explicitRateInput = options.frameRate;
+    this.resolveTiming();
     if (options.scheduler) this.frameLoop = options.scheduler;
     if (options.ease || options.easing) this.easing = resolveEasing(options.ease ?? options.easing);
     if (options.yoyo) this.direction = "alternate";
@@ -606,9 +643,22 @@ var Tween = class {
     if (this.isAnimating) this.startedAt = this.frameLoop.now() - this.elapsed;
     return this;
   }
-  setDuration(duration) {
-    this.duration = Math.max(0, duration);
+  setDuration(duration, rate) {
+    this.durationInput = duration;
+    if (rate !== void 0) this.explicitRateInput = rate;
+    this.resolveTiming();
     return this;
+  }
+  /** Effective timebase for authored frame/SMPTE fields. A standalone `;` timecode provisionally implies 29.97df until attached. */
+  get frameRate() {
+    const authored = [this.durationInput, this.delayInput, this.repeatDelayInput];
+    const provisional = authored.some((input) => typeof input === "string" && input.includes(";")) ? "29.97df" : 60;
+    return frameRate(this.explicitRateInput ?? this.inheritedRateInput ?? provisional);
+  }
+  /** Called by Timeline/Transport attachment. An explicit `frameRate` option is never overwritten. */
+  bindFrameRate(rate) {
+    this.inheritedRateInput = rate;
+    this.resolveTiming();
   }
   /** The frame index the tween's active time falls in, at `rate` (default 60 fps). Floor-based: matches which frame is on screen. */
   frameAt(rate = 60) {
@@ -670,6 +720,12 @@ var Tween = class {
     this.resolveFinished(this);
     return false;
   };
+  resolveTiming() {
+    const rate = this.frameRate;
+    this.duration = Math.max(0, parseTime(this.durationInput, rate));
+    this.delay = Math.max(0, parseTime(this.delayInput, rate));
+    this.repeatDelay = Math.max(0, parseTime(this.repeatDelayInput, rate));
+  }
   newFinishedPromise() {
     return new Promise((resolve) => {
       this.resolveFinished = resolve;
@@ -1035,7 +1091,8 @@ var Timeline = class _Timeline {
   cursor = 0;
   /** The furthest a marker/cue/region reaches; a cue-only timeline (no content) still has a real, sampleable duration. */
   markerCursor = 0;
-  rateInput;
+  explicitRateInput;
+  inheritedRateInput;
   points = [];
   markerMeta = /* @__PURE__ */ new Map();
   lastCycleTime = null;
@@ -1045,7 +1102,7 @@ var Timeline = class _Timeline {
   constructor(options = {}) {
     this.options = options;
     this.name = options.name;
-    this.rateInput = options.frameRate;
+    this.explicitRateInput = options.frameRate;
     if (options.autoplay) queueMicrotask(() => this.play());
   }
   // ---- content length vs. playback length -------------------------------
@@ -1055,10 +1112,13 @@ var Timeline = class _Timeline {
   }
   /** Content length including this timeline's own repeat/repeatDelay. `Infinity` when `repeat` is `Infinity`. */
   get totalDuration() {
-    return totalDuration({ duration: this.duration, delay: 0, repeat: this.options.repeat ?? 0, repeatDelay: this.options.repeatDelay ?? 0 });
+    return totalDuration({ duration: this.duration, delay: 0, repeat: this.options.repeat ?? 0, repeatDelay: this.repeatDelay });
   }
   get frameRate() {
-    return frameRate(this.rateInput ?? 60);
+    return frameRate(this.explicitRateInput ?? this.inheritedRateInput ?? 60);
+  }
+  get repeatDelay() {
+    return Math.max(0, parseTime(this.options.repeatDelay ?? 0, this.frameRate));
   }
   get frames() {
     return msToFrame(this.duration, this.frameRate);
@@ -1085,7 +1145,17 @@ var Timeline = class _Timeline {
     if (this.ownTransport && this.ownTransport !== transport) {
       throw new Error(`Timeline${this.name ? ` "${this.name}"` : ""} already has its own transport (it was played directly, or is already another transport's root).`);
     }
+    this.bindFrameRate(transport.frameRate);
     this.ownTransport = transport;
+  }
+  /** Adopt a containing timeline/transport timebase and remeasure every descendant item. Explicit timeline rates still win. */
+  bindFrameRate(rate) {
+    this.inheritedRateInput = rate;
+    for (const entry of this.entries) {
+      entry.item.bindFrameRate?.(this.frameRate);
+      entry.end = entry.start + entry.item.totalDuration;
+    }
+    this.cursor = this.entries.reduce((max, entry) => Math.max(max, entry.end), 0);
   }
   label(name, at = this.cursor) {
     const time = this.resolvePosition(at, this.entries.at(-1));
@@ -1098,8 +1168,8 @@ var Timeline = class _Timeline {
       if (item.parentTimeline) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ""} is already attached to another timeline.`);
       if (item.ownTransport) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ""} already has its own transport (it was played directly); nest it before playing it.`);
       item.parentTimeline = this;
-      if (item.rateInput == null && this.rateInput != null) item.rateInput = this.rateInput;
     }
+    if (this.explicitRateInput !== void 0 || this.inheritedRateInput !== void 0) item.bindFrameRate?.(this.frameRate);
     const previous = this.entries.at(-1);
     const start = this.resolvePosition(at, previous);
     const end = start + item.totalDuration;
@@ -1272,7 +1342,7 @@ var Timeline = class _Timeline {
   get transport() {
     if (this.parentTimeline) throw new Error(this.nestedError());
     if (!this.ownTransport) {
-      this.ownTransport = new Transport({ root: this, scheduler: this.options.scheduler, frameRate: this.rateInput, snap: this.options.snap });
+      this.ownTransport = new Transport({ root: this, scheduler: this.options.scheduler, frameRate: this.frameRate, snap: this.options.snap });
     }
     return this.ownTransport;
   }
@@ -1317,7 +1387,7 @@ var Timeline = class _Timeline {
       duration: this.duration,
       delay: 0,
       repeat: this.options.repeat ?? 0,
-      repeatDelay: this.options.repeatDelay ?? 0,
+      repeatDelay: this.repeatDelay,
       direction: this.options.yoyo ? "alternate" : "normal",
       reversed: false
     };

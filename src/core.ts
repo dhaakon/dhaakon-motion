@@ -3,7 +3,7 @@ import { interpolate, type MotionValueShape } from './interpolate';
 import { scheduler, type FrameScheduler, type FrameTask } from './scheduler';
 import { sampleCycle, type Direction } from './cycle';
 import type { RenderContext, TimelineItem } from './items';
-import { frameRate, msToFrame, type FrameRateInput } from './time';
+import { frameRate, msToFrame, parseTime, type FrameRate, type FrameRateInput, type TimeInput } from './time';
 import { msToTimecode, type Timecode } from './timecode';
 import { Track } from './track';
 
@@ -12,7 +12,9 @@ export interface PropertyRange { start: number; end: number; unit?: string; }
 export interface TweenOptions<T extends MotionValueShape = number> {
   name?: string;
   from?: T; to?: T; curve?: [T, T] | Line; properties?: Record<string, PropertyRange>; node?: HTMLElement | null;
-  duration?: number; delay?: number; repeat?: number; repeatDelay?: number; yoyo?: boolean; direction?: Direction;
+  /** Milliseconds, seconds (`'1.5s'`), frames (`'36f'`), or SMPTE timecode. Frame forms inherit their parent Transport/Timeline rate unless `frameRate` is explicit. */
+  duration?: TimeInput; delay?: TimeInput; repeat?: number; repeatDelay?: TimeInput; yoyo?: boolean; direction?: Direction;
+  frameRate?: FrameRateInput;
   easing?: EasingInput | EasingName; ease?: EasingInput | EasingName; autoplay?: boolean;
   onBegin?: (tween: Tween<T>) => void; onStart?: (tween: Tween<T>) => void;
   onUpdate?: (value: T, progress: number, tween: Tween<T>) => void;
@@ -40,6 +42,11 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
   onBegin?: TweenOptions<T>['onBegin']; onStart?: TweenOptions<T>['onStart']; onUpdate?: TweenOptions<T>['onUpdate'];
   onEnd?: TweenOptions<T>['onEnd']; onComplete?: TweenOptions<T>['onComplete'];
   value: T = this.from; progress = 0; elapsed = 0;
+  private durationInput: TimeInput = 300;
+  private delayInput: TimeInput = 0;
+  private repeatDelayInput: TimeInput = 0;
+  private explicitRateInput?: FrameRateInput;
+  private inheritedRateInput?: FrameRateInput;
   private frameLoop: FrameScheduler = scheduler; private startedAt = 0; private removeFrame?: () => void;
   private resolveFinished!: (tween: this) => void; finished: Promise<this>;
 
@@ -49,7 +56,13 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
   }
 
   configure(options: TweenOptions<T>) {
-    for (const [key, value] of Object.entries(options)) if (value !== undefined) (this as any)[key] = value;
+    const timingKeys = new Set(['duration', 'delay', 'repeatDelay', 'frameRate']);
+    for (const [key, value] of Object.entries(options)) if (value !== undefined && !timingKeys.has(key)) (this as any)[key] = value;
+    if (options.duration !== undefined) this.durationInput = options.duration;
+    if (options.delay !== undefined) this.delayInput = options.delay;
+    if (options.repeatDelay !== undefined) this.repeatDelayInput = options.repeatDelay;
+    if (options.frameRate !== undefined) this.explicitRateInput = options.frameRate;
+    this.resolveTiming();
     if (options.scheduler) this.frameLoop = options.scheduler;
     if (options.ease || options.easing) this.easing = resolveEasing(options.ease ?? options.easing);
     if (options.yoyo) this.direction = 'alternate';
@@ -97,7 +110,20 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
     if (!Number.isFinite(milliseconds)) return this;
     this.elapsed = Math.max(0, Math.min(this.totalDuration, milliseconds)); this.sampleAt(this.elapsed); if (this.isAnimating) this.startedAt = this.frameLoop.now() - this.elapsed; return this;
   }
-  setDuration(duration: number) { this.duration = Math.max(0, duration); return this; }
+  setDuration(duration: TimeInput, rate?: FrameRateInput) {
+    this.durationInput = duration;
+    if (rate !== undefined) this.explicitRateInput = rate;
+    this.resolveTiming();
+    return this;
+  }
+  /** Effective timebase for authored frame/SMPTE fields. A standalone `;` timecode provisionally implies 29.97df until attached. */
+  get frameRate(): FrameRate {
+    const authored = [this.durationInput, this.delayInput, this.repeatDelayInput];
+    const provisional = authored.some((input) => typeof input === 'string' && input.includes(';')) ? '29.97df' : 60;
+    return frameRate(this.explicitRateInput ?? this.inheritedRateInput ?? provisional);
+  }
+  /** Called by Timeline/Transport attachment. An explicit `frameRate` option is never overwritten. */
+  bindFrameRate(rate: FrameRateInput) { this.inheritedRateInput = rate; this.resolveTiming(); }
   /** The frame index the tween's active time falls in, at `rate` (default 60 fps). Floor-based: matches which frame is on screen. */
   frameAt(rate: FrameRateInput = 60) { return msToFrame(Math.max(0, this.elapsed - this.delay), frameRate(rate)); }
   /** The SMPTE timecode for the tween's active time, at `rate`. */
@@ -139,6 +165,12 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
     this.isAnimating = false; this.isPaused = false; this.state = 'finished';
     this.onEnd?.(this); this.onComplete?.(this); this.resolveFinished(this); return false;
   };
+  private resolveTiming() {
+    const rate = this.frameRate;
+    this.duration = Math.max(0, parseTime(this.durationInput, rate));
+    this.delay = Math.max(0, parseTime(this.delayInput, rate));
+    this.repeatDelay = Math.max(0, parseTime(this.repeatDelayInput, rate));
+  }
   private newFinishedPromise() { return new Promise<this>((resolve) => { this.resolveFinished = resolve; }); }
 }
 

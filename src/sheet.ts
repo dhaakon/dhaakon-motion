@@ -89,9 +89,10 @@ function buildItem(item: SheetItem, bindings: SheetBindings, strict: boolean, pa
     const tween = new Tween<MotionValueShape>({
       name: tween_.name,
       from: tween_.from, to: tween_.to,
-      duration: tween_.duration != null ? parseTime(tween_.duration, rate) : undefined,
-      delay: tween_.delay != null ? parseTime(tween_.delay, rate) : undefined,
-      repeat: tween_.repeat, repeatDelay: tween_.repeatDelay != null ? parseTime(tween_.repeatDelay, rate) : undefined,
+      duration: tween_.duration,
+      delay: tween_.delay,
+      repeat: tween_.repeat, repeatDelay: tween_.repeatDelay,
+      frameRate: rate,
       yoyo: tween_.yoyo,
       easing: resolveEasingWithBindings(tween_.easing, bindings.easings),
       onUpdate: write ? (value) => write(value) : undefined,
@@ -106,7 +107,7 @@ function buildItem(item: SheetItem, bindings: SheetBindings, strict: boolean, pa
       name: track_.name,
       frameRate: rate,
       keyframes: track_.keyframes.map((k) => ({ at: k.at, value: k.value, easing: k.easing })),
-      repeat: track_.repeat, repeatDelay: track_.repeatDelay != null ? parseTime(track_.repeatDelay, rate) : undefined,
+      repeat: track_.repeat, repeatDelay: track_.repeatDelay,
       direction: track_.direction === 'alternate' ? 'alternate' : 'normal',
       easing: resolveEasingWithBindings(track_.easing, bindings.easings),
       apply: write ?? (() => {}),
@@ -149,7 +150,7 @@ function buildTimeline(
     name: sheet.name,
     frameRate: rate,
     repeat: sheet.repeat,
-    repeatDelay: sheet.repeatDelay != null ? parseTime(sheet.repeatDelay, rate) : undefined,
+    repeatDelay: sheet.repeatDelay,
     yoyo: sheet.direction === 'alternate',
   };
   const timeline = new Timeline(options);
@@ -321,9 +322,8 @@ export function applyScene(state: SceneState, targets: TargetMap, options: Apply
     const staggerDelay = typeof stagger === 'function' ? stagger(key, index) : (stagger ?? 0) * index;
     timeline.add(new Tween<MotionValueShape>({
       ...transitionOptions, from, to: value,
-      delay: (transitionOptions.delay ?? 0) + staggerDelay,
       onUpdate: (value) => writerFor(target)(value),
-    }), 0);
+    }), staggerDelay);
   });
   timeline.play();
   return timeline;
@@ -344,11 +344,11 @@ export function sceneTransition(from: SceneState, to: SceneState, targets: Targe
     const staggerDelay = typeof options.stagger === 'function' ? options.stagger(key, index) : (options.stagger ?? 0) * index;
     timeline.add(new Tween<MotionValueShape>({
       from: from[key] ?? to[key], to: to[key] ?? from[key],
-      duration: options.duration != null ? parseTime(options.duration) : undefined,
-      delay: (options.delay != null ? parseTime(options.delay) : 0) + staggerDelay,
+      duration: options.duration,
+      delay: options.delay,
       easing: options.easing != null ? resolveEasing(options.easing) : undefined,
       onUpdate: (value) => writerFor(target)(value),
-    }), 0);
+    }), staggerDelay);
   });
   return timeline;
 }

@@ -2,7 +2,7 @@ import { Tween } from './core';
 import type { MotionValueShape } from './interpolate';
 import { sampleCycle, totalDuration as cycleTotalDuration, type Direction } from './cycle';
 import { defaultRenderContext, type CueEvent, type CueOptions, type Marker, type RenderContext, type TimelineItem } from './items';
-import { frameRate, msToFrame, parseTime, type FrameRateInput } from './time';
+import { frameRate, msToFrame, parseTime, type FrameRateInput, type TimeInput } from './time';
 import { formatTimecode, msToTimecode } from './timecode';
 import type { FrameScheduler } from './scheduler';
 import { Transport } from './transport';
@@ -25,7 +25,7 @@ export interface InspectNode {
 export interface TimelineOptions {
   name?: string;
   repeat?: number;
-  repeatDelay?: number;
+  repeatDelay?: TimeInput;
   yoyo?: boolean;
   autoplay?: boolean;
   onUpdate?: (time: number, progress: number) => void;
@@ -70,7 +70,8 @@ export class Timeline implements TimelineItem {
   private cursor = 0;
   /** The furthest a marker/cue/region reaches; a cue-only timeline (no content) still has a real, sampleable duration. */
   private markerCursor = 0;
-  private rateInput?: FrameRateInput;
+  private explicitRateInput?: FrameRateInput;
+  private inheritedRateInput?: FrameRateInput;
   private points: CrossingPoint[] = [];
   private markerMeta = new Map<string, { color?: string; payload?: unknown }>();
   private lastCycleTime: number | null = null;
@@ -82,7 +83,7 @@ export class Timeline implements TimelineItem {
   constructor(options: TimelineOptions = {}) {
     this.options = options;
     this.name = options.name;
-    this.rateInput = options.frameRate;
+    this.explicitRateInput = options.frameRate;
     if (options.autoplay) queueMicrotask(() => this.play());
   }
 
@@ -91,9 +92,10 @@ export class Timeline implements TimelineItem {
   get duration() { return Math.max(this.cursor, this.markerCursor); }
   /** Content length including this timeline's own repeat/repeatDelay. `Infinity` when `repeat` is `Infinity`. */
   get totalDuration() {
-    return cycleTotalDuration({ duration: this.duration, delay: 0, repeat: this.options.repeat ?? 0, repeatDelay: this.options.repeatDelay ?? 0 });
+    return cycleTotalDuration({ duration: this.duration, delay: 0, repeat: this.options.repeat ?? 0, repeatDelay: this.repeatDelay });
   }
-  get frameRate() { return frameRate(this.rateInput ?? 60); }
+  get frameRate() { return frameRate(this.explicitRateInput ?? this.inheritedRateInput ?? 60); }
+  private get repeatDelay() { return Math.max(0, parseTime(this.options.repeatDelay ?? 0, this.frameRate)); }
   get frames() { return msToFrame(this.duration, this.frameRate); }
   timecode(ms = this.duration) { return msToTimecode(ms, this.frameRate); }
 
@@ -112,7 +114,18 @@ export class Timeline implements TimelineItem {
     if (this.ownTransport && this.ownTransport !== transport) {
       throw new Error(`Timeline${this.name ? ` "${this.name}"` : ''} already has its own transport (it was played directly, or is already another transport's root).`);
     }
+    this.bindFrameRate(transport.frameRate);
     this.ownTransport = transport;
+  }
+
+  /** Adopt a containing timeline/transport timebase and remeasure every descendant item. Explicit timeline rates still win. */
+  bindFrameRate(rate: FrameRateInput) {
+    this.inheritedRateInput = rate;
+    for (const entry of this.entries) {
+      entry.item.bindFrameRate?.(this.frameRate);
+      entry.end = entry.start + entry.item.totalDuration;
+    }
+    this.cursor = this.entries.reduce((max, entry) => Math.max(max, entry.end), 0);
   }
 
   label(name: string, at: TimelinePosition = this.cursor) {
@@ -127,8 +140,11 @@ export class Timeline implements TimelineItem {
       if (item.parentTimeline) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ''} is already attached to another timeline.`);
       if (item.ownTransport) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ''} already has its own transport (it was played directly); nest it before playing it.`);
       item.parentTimeline = this;
-      if (item.rateInput == null && this.rateInput != null) item.rateInput = this.rateInput;
     }
+    // A root with no authored/inherited rate is still provisional: children already
+    // use their own 60fps (or drop-frame) fallback and will be rebound by Transport.
+    // Avoid replacing that provisional context with an indistinguishable default 60.
+    if (this.explicitRateInput !== undefined || this.inheritedRateInput !== undefined) item.bindFrameRate?.(this.frameRate);
     const previous = this.entries.at(-1);
     const start = this.resolvePosition(at, previous);
     const end = start + item.totalDuration;
@@ -289,7 +305,7 @@ export class Timeline implements TimelineItem {
   private get transport(): Transport {
     if (this.parentTimeline) throw new Error(this.nestedError());
     if (!this.ownTransport) {
-      this.ownTransport = new Transport({ root: this, scheduler: this.options.scheduler, frameRate: this.rateInput, snap: this.options.snap });
+      this.ownTransport = new Transport({ root: this, scheduler: this.options.scheduler, frameRate: this.frameRate, snap: this.options.snap });
     }
     return this.ownTransport;
   }
@@ -313,7 +329,7 @@ export class Timeline implements TimelineItem {
   sampleAt(localMs: number, ctx: RenderContext = defaultRenderContext) {
     const spec = {
       duration: this.duration, delay: 0,
-      repeat: this.options.repeat ?? 0, repeatDelay: this.options.repeatDelay ?? 0,
+      repeat: this.options.repeat ?? 0, repeatDelay: this.repeatDelay,
       direction: (this.options.yoyo ? 'alternate' : 'normal') as Direction, reversed: false,
     };
     const { cycleTime, iteration, progress } = sampleCycle(spec, localMs);

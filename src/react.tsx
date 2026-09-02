@@ -5,7 +5,7 @@ import {
   type TweenOptions, type TrackOptions, type Keyframe, type EasingFunction, type EasingInput, type EasingName,
   type MotionValueShape, type MotionStyle, type TimelineItem, type TimelinePosition, type TimelineOptions,
   type CueEvent, type CueOptions, type TransportOptions, type TransportOutput, type TransportState, type Clock,
-  type FrameRateInput,
+  type FrameRateInput, type TimeInput,
   captureScene, applyScene, type SceneState, type ApplySceneOptions,
 } from '@dhaakon/motion';
 
@@ -13,13 +13,13 @@ export type { MotionStyle };
 // Note: this entry's `Tween`/`Track` exports are the React components below (JSX elements), not the
 // core classes — import those from '@dhaakon/motion' directly when you need them imperatively.
 
-export interface MotionTransition { duration?: number; delay?: number; repeat?: number; repeatDelay?: number; yoyo?: boolean; easing?: EasingFunction | EasingName; }
-export interface MotionConfigValue { transition?: MotionTransition; reducedMotion?: 'user' | 'always' | 'never'; }
+export interface MotionTransition { duration?: TimeInput; delay?: TimeInput; repeat?: number; repeatDelay?: TimeInput; yoyo?: boolean; easing?: EasingFunction | EasingName; frameRate?: FrameRateInput; }
+export interface MotionConfigValue { transition?: MotionTransition; reducedMotion?: 'user' | 'always' | 'never'; frameRate?: FrameRateInput; }
 const MotionContext = createContext<MotionConfigValue>({ reducedMotion: 'user' });
 
 export function MotionConfig({ children, ...value }: MotionConfigValue & { children: React.ReactNode }) {
   const parent = useContext(MotionContext);
-  return <MotionContext.Provider value={useMemo(() => ({ ...parent, ...value, transition: { ...parent.transition, ...value.transition } }), [parent, value.transition, value.reducedMotion])}>{children}</MotionContext.Provider>;
+  return <MotionContext.Provider value={useMemo(() => ({ ...parent, ...value, transition: { ...parent.transition, ...value.transition } }), [parent, value.transition, value.reducedMotion, value.frameRate])}>{children}</MotionContext.Provider>;
 }
 
 export function useReducedMotion() {
@@ -69,13 +69,13 @@ export function useMotionValueState<T extends MotionValueShape>(value: MotionVal
 
 export function useTween<T extends MotionValueShape>(from: T, to: T, options: Omit<TweenOptions<T>, 'from' | 'to'> = {}) {
   const motionValue = useMotionValue(from); const tween = useRef<CoreTween<T> | null>(null); const reduced = useReducedMotion();
-  const transition = useContext(MotionContext).transition;
+  const config = useContext(MotionContext); const transition = config.transition;
   const fromKey = stableKey(from); const toKey = stableKey(to);
   useEffect(() => {
     motionValue.set(from);
-    tween.current = motionValue.animate(to, { ...transition, ...options, duration: reduced ? 0 : options.duration ?? transition?.duration });
+    tween.current = motionValue.animate(to, { frameRate: config.frameRate, ...transition, ...options, duration: reduced ? 0 : options.duration ?? transition?.duration });
     return () => { tween.current?.cancel(); };
-  }, [motionValue, fromKey, toKey, reduced, options.duration, options.delay, options.repeat, options.repeatDelay, options.yoyo, options.easing, options.ease]);
+  }, [motionValue, fromKey, toKey, reduced, config.frameRate, transition?.frameRate, options.frameRate, options.duration, options.delay, options.repeat, options.repeatDelay, options.yoyo, options.easing, options.ease]);
   return { value: useMotionValueState(motionValue), motionValue, controls: tween };
 }
 
@@ -114,10 +114,10 @@ export function createMotionComponent<T extends React.ElementType>(tag: T) {
       const from = hasAnimated.current || initial === false ? readStyle(node, activeTarget) : { ...(initial || readStyle(node, activeTarget)) };
       hasAnimated.current = true;
       if (reduced) { writeStyle(node, activeTarget); onMotionComplete?.(); return; }
-      const tween = new CoreTween<MotionStyle>({ ...config.transition, ...transition, from, to: activeTarget,
+      const tween = new CoreTween<MotionStyle>({ frameRate: config.frameRate, ...config.transition, ...transition, from, to: activeTarget,
         onStart: () => onMotionStart?.(), onUpdate: (value) => writeStyle(node, value), onComplete: () => onMotionComplete?.() }).play();
       return () => { tween.cancel(); };
-    }, [initialKey, targetKey, viewKey, inView, reduced, transition?.duration, transition?.delay, transition?.repeat, transition?.repeatDelay, transition?.yoyo, transition?.easing]);
+    }, [initialKey, targetKey, viewKey, inView, reduced, config.frameRate, config.transition?.frameRate, transition?.frameRate, transition?.duration, transition?.delay, transition?.repeat, transition?.repeatDelay, transition?.yoyo, transition?.easing]);
     return React.createElement(as || tag, { ...props, style, ref: (node: HTMLElement | null) => { localRef.current = node; inViewRef.current = node; } });
   });
   return Component as React.ForwardRefExoticComponent<MotionElementProps<T> & React.RefAttributes<HTMLElement>>;
@@ -462,7 +462,7 @@ export interface SequenceProps {
   name?: string;
   at?: TimelinePosition;
   repeat?: number;
-  repeatDelay?: number;
+  repeatDelay?: TimeInput;
   yoyo?: boolean;
   frameRate?: FrameRateInput;
   snap?: boolean;

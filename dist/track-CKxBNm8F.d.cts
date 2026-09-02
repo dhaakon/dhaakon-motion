@@ -1,3 +1,48 @@
+/** A rational frame rate: `num / den` frames per second, with an optional SMPTE drop-frame flag. */
+interface FrameRate {
+    readonly num: number;
+    readonly den: number;
+    readonly dropFrame: boolean;
+    readonly fps: number;
+    readonly label: string;
+}
+type FrameRateInput = number | string | FrameRate | {
+    num: number;
+    den?: number;
+    dropFrame?: boolean;
+};
+/** Named presets for the common broadcast and film frame rates. */
+declare const FrameRates: {
+    readonly '23.976': FrameRate;
+    readonly '24': FrameRate;
+    readonly '25': FrameRate;
+    readonly '29.97': FrameRate;
+    readonly '29.97df': FrameRate;
+    readonly '30': FrameRate;
+    readonly '50': FrameRate;
+    readonly '59.94': FrameRate;
+    readonly '59.94df': FrameRate;
+    readonly '60': FrameRate;
+};
+/** Normalize a frame rate input (a plain number, a preset string like `'29.97df'`, or an explicit `{num, den}`) into a `FrameRate`. */
+declare function frameRate(input: FrameRateInput): FrameRate;
+/** Convert a frame index into milliseconds at a given rate. */
+declare function frameToMs(frame: number, rate: FrameRate): number;
+/** Convert milliseconds into the frame index that contains that instant (floor, with a small epsilon to absorb float error). */
+declare function msToFrame(ms: number, rate: FrameRate): number;
+/** Quantize milliseconds down to the start of its containing frame. */
+declare function snapToFrame(ms: number, rate: FrameRate): number;
+/**
+ * A time value as authored: plain milliseconds, or a string with a unit —
+ * `'12f'` (frames, needs a rate), `'1.5s'` (seconds), `'500ms'`, or a SMPTE
+ * timecode (`'HH:MM:SS:FF'` / `'HH:MM:SS;FF'`, needs a rate).
+ */
+type TimeInput = number | string;
+/** Resolve any `TimeInput` form into milliseconds. Frame and timecode forms require `rate`. */
+declare function parseTime(input: TimeInput, rate?: FrameRateInput): number;
+/** Format milliseconds for display. `'frames'` and `'timecode'` styles require `rate`. */
+declare function formatTime(ms: number, rate?: FrameRateInput, style?: 'ms' | 'seconds' | 'frames' | 'timecode'): string;
+
 type MotionPrimitive = number | string;
 type MotionValueShape = MotionPrimitive | MotionPrimitive[] | {
     [key: string]: MotionValueShape | undefined;
@@ -49,51 +94,6 @@ declare function resolveEasing(easing?: EasingFunction | EasingName | EasingInpu
  * result), else `undefined` for an anonymous function.
  */
 declare function serializeEasing(input: EasingInput | undefined): EasingInput | undefined;
-
-/** A rational frame rate: `num / den` frames per second, with an optional SMPTE drop-frame flag. */
-interface FrameRate {
-    readonly num: number;
-    readonly den: number;
-    readonly dropFrame: boolean;
-    readonly fps: number;
-    readonly label: string;
-}
-type FrameRateInput = number | string | FrameRate | {
-    num: number;
-    den?: number;
-    dropFrame?: boolean;
-};
-/** Named presets for the common broadcast and film frame rates. */
-declare const FrameRates: {
-    readonly '23.976': FrameRate;
-    readonly '24': FrameRate;
-    readonly '25': FrameRate;
-    readonly '29.97': FrameRate;
-    readonly '29.97df': FrameRate;
-    readonly '30': FrameRate;
-    readonly '50': FrameRate;
-    readonly '59.94': FrameRate;
-    readonly '59.94df': FrameRate;
-    readonly '60': FrameRate;
-};
-/** Normalize a frame rate input (a plain number, a preset string like `'29.97df'`, or an explicit `{num, den}`) into a `FrameRate`. */
-declare function frameRate(input: FrameRateInput): FrameRate;
-/** Convert a frame index into milliseconds at a given rate. */
-declare function frameToMs(frame: number, rate: FrameRate): number;
-/** Convert milliseconds into the frame index that contains that instant (floor, with a small epsilon to absorb float error). */
-declare function msToFrame(ms: number, rate: FrameRate): number;
-/** Quantize milliseconds down to the start of its containing frame. */
-declare function snapToFrame(ms: number, rate: FrameRate): number;
-/**
- * A time value as authored: plain milliseconds, or a string with a unit —
- * `'12f'` (frames, needs a rate), `'1.5s'` (seconds), `'500ms'`, or a SMPTE
- * timecode (`'HH:MM:SS:FF'` / `'HH:MM:SS;FF'`, needs a rate).
- */
-type TimeInput = number | string;
-/** Resolve any `TimeInput` form into milliseconds. Frame and timecode forms require `rate`. */
-declare function parseTime(input: TimeInput, rate?: FrameRateInput): number;
-/** Format milliseconds for display. `'frames'` and `'timecode'` styles require `rate`. */
-declare function formatTime(ms: number, rate?: FrameRateInput, style?: 'ms' | 'seconds' | 'frames' | 'timecode'): string;
 
 type Direction = 'normal' | 'reverse' | 'alternate' | 'alternate-reverse';
 interface CycleSpec {
@@ -179,12 +179,14 @@ interface TweenOptions<T extends MotionValueShape = number> {
     curve?: [T, T] | Line;
     properties?: Record<string, PropertyRange>;
     node?: HTMLElement | null;
-    duration?: number;
-    delay?: number;
+    /** Milliseconds, seconds (`'1.5s'`), frames (`'36f'`), or SMPTE timecode. Frame forms inherit their parent Transport/Timeline rate unless `frameRate` is explicit. */
+    duration?: TimeInput;
+    delay?: TimeInput;
     repeat?: number;
-    repeatDelay?: number;
+    repeatDelay?: TimeInput;
     yoyo?: boolean;
     direction?: Direction;
+    frameRate?: FrameRateInput;
     easing?: EasingInput | EasingName;
     ease?: EasingInput | EasingName;
     autoplay?: boolean;
@@ -226,6 +228,11 @@ declare class Tween<T extends MotionValueShape = number> implements TimelineItem
     value: T;
     progress: number;
     elapsed: number;
+    private durationInput;
+    private delayInput;
+    private repeatDelayInput;
+    private explicitRateInput?;
+    private inheritedRateInput?;
     private frameLoop;
     private startedAt;
     private removeFrame?;
@@ -241,7 +248,11 @@ declare class Tween<T extends MotionValueShape = number> implements TimelineItem
     reverse(): this;
     seek(progress: number): this;
     seekTime(milliseconds: number): this;
-    setDuration(duration: number): this;
+    setDuration(duration: TimeInput, rate?: FrameRateInput): this;
+    /** Effective timebase for authored frame/SMPTE fields. A standalone `;` timecode provisionally implies 29.97df until attached. */
+    get frameRate(): FrameRate;
+    /** Called by Timeline/Transport attachment. An explicit `frameRate` option is never overwritten. */
+    bindFrameRate(rate: FrameRateInput): void;
     /** The frame index the tween's active time falls in, at `rate` (default 60 fps). Floor-based: matches which frame is on screen. */
     frameAt(rate?: FrameRateInput): number;
     /** The SMPTE timecode for the tween's active time, at `rate`. */
@@ -256,6 +267,7 @@ declare class Tween<T extends MotionValueShape = number> implements TimelineItem
     get totalDuration(): number;
     sampleAt(milliseconds: number, _ctx?: RenderContext): T;
     private advance;
+    private resolveTiming;
     private newFinishedPromise;
 }
 declare class MotionValue<T extends MotionValueShape> {
@@ -294,7 +306,7 @@ interface InspectNode {
 interface TimelineOptions {
     name?: string;
     repeat?: number;
-    repeatDelay?: number;
+    repeatDelay?: TimeInput;
     yoyo?: boolean;
     autoplay?: boolean;
     onUpdate?: (time: number, progress: number) => void;
@@ -321,7 +333,8 @@ declare class Timeline implements TimelineItem {
     private cursor;
     /** The furthest a marker/cue/region reaches; a cue-only timeline (no content) still has a real, sampleable duration. */
     private markerCursor;
-    private rateInput?;
+    private explicitRateInput?;
+    private inheritedRateInput?;
     private points;
     private markerMeta;
     private lastCycleTime;
@@ -334,6 +347,7 @@ declare class Timeline implements TimelineItem {
     /** Content length including this timeline's own repeat/repeatDelay. `Infinity` when `repeat` is `Infinity`. */
     get totalDuration(): number;
     get frameRate(): FrameRate;
+    private get repeatDelay();
     get frames(): number;
     timecode(ms?: number): Timecode;
     get parent(): Timeline | undefined;
@@ -346,6 +360,8 @@ declare class Timeline implements TimelineItem {
     get rootTransport(): Transport | undefined;
     /** Called by a `Transport`'s constructor when it adopts this timeline as its `root` (including its own default root). Not usually called directly. */
     bindTransport(transport: Transport): void;
+    /** Adopt a containing timeline/transport timebase and remeasure every descendant item. Explicit timeline rates still win. */
+    bindFrameRate(rate: FrameRateInput): void;
     label(name: string, at?: TimelinePosition): this;
     add(item: TimelineItem, at?: TimelinePosition): this;
     /** @deprecated kept for the pre-0.4 API; identical to `add`. */
@@ -563,6 +579,8 @@ interface TimelineItem {
     readonly totalDuration: number;
     /** Write values (and, for timelines, fire cues) for a local time. `ctx` carries direction and, when driven by a transport, frame/transport info. */
     sampleAt(localMs: number, ctx?: RenderContext): void;
+    /** Adopt a parent timeline/transport timebase for authored frame and SMPTE literals. Explicit item rates still win. */
+    bindFrameRate?(rate: FrameRateInput): void;
     /** Clear any "already fired" state (cue `once`, crossing history) so the next sample starts fresh. */
     reset?(): void;
 }
@@ -614,7 +632,7 @@ interface TrackOptions<T extends MotionValueShape> {
     /** Resolves frame/timecode `at` values. */
     frameRate?: FrameRateInput;
     repeat?: number;
-    repeatDelay?: number;
+    repeatDelay?: TimeInput;
     direction?: Direction;
     /** Default easing for every segment that doesn't specify its own. */
     easing?: EasingInput;
@@ -623,16 +641,25 @@ interface TrackOptions<T extends MotionValueShape> {
 declare class Track<T extends MotionValueShape> implements TimelineItem {
     readonly kind: "track";
     name?: string;
-    readonly keyframes: ReadonlyArray<{
-        at: number;
-        value: T;
-    }>;
+    private resolvedKeyframes;
+    private authoredKeyframes;
     private segments;
     private apply;
     private repeat;
     private repeatDelay;
+    private repeatDelayInput;
     private direction;
+    private explicitRateInput?;
+    private inheritedRateInput?;
+    private defaultEasing?;
     constructor(options: TrackOptions<T>);
+    get keyframes(): readonly {
+        at: number;
+        value: T;
+    }[];
+    get frameRate(): FrameRate;
+    bindFrameRate(rate: FrameRateInput): void;
+    private resolveTiming;
     /** Content length: the last keyframe's time. */
     get duration(): number;
     get totalDuration(): number;

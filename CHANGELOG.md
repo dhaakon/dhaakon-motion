@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0
+
+Frame-native tween authoring and a complete production-control documentation suite.
+
+### Added
+
+- `Tween` timing fields `duration`, `delay`, and `repeatDelay` now accept the complete `TimeInput` vocabulary: milliseconds, seconds, frames, and SMPTE timecode.
+- `TweenOptions.frameRate` provides an explicit local timebase. Otherwise a tween inherits its containing `Timeline`/`Transport` rate and re-resolves authored timing when attached; an explicit tween or nested-timeline rate always wins.
+- `Track.repeatDelay`, `Timeline.repeatDelay`, React `MotionTransition`, declarative `<Tween>`, and `<Sequence repeatDelay>` use the same time vocabulary. `MotionConfig` can provide a frame rate for standalone React motion.
+- Documentation now contains seven large live production labs covering SMPTE/frame control, deterministic offline passes, nested cue orchestration, unified DOM/Three.js/Canvas/audio/hardware output, React lifecycle, serializable cue sheets/scene state, and timeline testing/inspection.
+
+### Changed
+
+- Cue-sheet construction preserves authored time literals through item creation instead of eagerly converting them to milliseconds.
+- Scene-state stagger is represented as timeline placement, allowing the transition's own delay to retain an inherited frame/timecode timebase.
+
 ## 0.4.0
 
 Transport, SMPTE timecode, nested cue timelines, deterministic offline rendering, outputs for DOM/Three.js/audio/MIDI, serializable cue sheets and scene states, a declarative React composition layer, and stronger test tooling and inspection.
@@ -37,7 +53,6 @@ Transport, SMPTE timecode, nested cue timelines, deterministic offline rendering
 - Audio clip positions inside a *repeating* nested timeline are not lap-aware (`audioOutput`/`renderAudio` place them as if that timeline never repeats); put clips on the root or a non-repeating container.
 - No `<AudioClip>` React component — `useTransport()` to add one imperatively, keeping the `react` entry free of a Web Audio dependency.
 - `Track`-level "current value" isn't exposed for `./testing`'s `sample()`/`expectSample()` (Tween-only, documented as a stopgap).
-- The documentation site's interactive sections were not extended for 0.4 in this pass; it still builds and serves the 0.3 tour unchanged.
 
 ## 0.3.2 and earlier
 

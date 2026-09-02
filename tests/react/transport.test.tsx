@@ -56,6 +56,23 @@ test('<Sequence> registers its children in declaration order, matching an impera
   expect(showNode.children.map((child) => child.start)).toEqual([0, 100, 200]);
 });
 
+test('declarative Tween timing fields inherit the nearest Transport frame rate', async () => {
+  const { scheduler } = createTestScheduler();
+  const transport = new CoreTransport({ scheduler, frameRate: 24 });
+  const value = new MotionValue<number>(0);
+  render(
+    <Transport transport={transport}>
+      <Sequence name="timecode-show" repeatDelay="6f">
+        <Tween target={value} from={0} to={1} duration="24f" delay="12f" />
+      </Sequence>
+    </Transport>,
+  );
+  await flush();
+  const sequence = transport.root.items[0].item;
+  expect(sequence.totalDuration).toBeCloseTo(1500, 6);
+  expect(transport.duration).toBeCloseTo(1500, 6);
+});
+
 test('a rebuild after a prop change preserves the playhead', async () => {
   const { scheduler } = createTestScheduler();
   const transport = new CoreTransport({ scheduler, duration: 2000 }); // larger than any content, so seek(1200) below isn't clamped

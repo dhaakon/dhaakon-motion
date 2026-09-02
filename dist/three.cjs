@@ -307,25 +307,51 @@ function sampleCycle(spec, milliseconds) {
 var Track = class {
   kind = "track";
   name;
-  keyframes;
+  resolvedKeyframes = [];
+  authoredKeyframes;
   segments = [];
   apply;
   repeat;
   repeatDelay;
+  repeatDelayInput;
   direction;
+  explicitRateInput;
+  inheritedRateInput;
+  defaultEasing;
   constructor(options) {
     if (!options.apply && !options.target) throw new Error("Track needs either `apply` or `target`.");
     this.name = options.name;
     this.apply = options.apply ?? ((value) => options.target.set(value));
     this.repeat = options.repeat ?? 0;
-    this.repeatDelay = options.repeatDelay ?? 0;
+    this.repeatDelayInput = options.repeatDelay ?? 0;
+    this.repeatDelay = 0;
     this.direction = options.direction ?? "normal";
+    this.explicitRateInput = options.frameRate;
+    this.defaultEasing = options.easing;
+    this.authoredKeyframes = options.keyframes.map((key) => ({ ...key }));
     if (!options.keyframes.length) throw new Error("Track needs at least one keyframe.");
-    const rate = options.frameRate ? frameRate(options.frameRate) : void 0;
-    const resolved = options.keyframes.map((key) => ({ at: typeof key.at === "number" ? key.at : parseTime(key.at, rate), value: key.value, easing: key.easing })).sort((a, b) => a.at - b.at);
-    this.keyframes = resolved.map(({ at, value }) => ({ at, value }));
+    this.resolveTiming();
+  }
+  get keyframes() {
+    return this.resolvedKeyframes;
+  }
+  get frameRate() {
+    const authored = [...this.authoredKeyframes.map((keyframe) => keyframe.at), this.repeatDelayInput];
+    const provisional = authored.some((input) => typeof input === "string" && input.includes(";")) ? "29.97df" : 60;
+    return frameRate(this.explicitRateInput ?? this.inheritedRateInput ?? provisional);
+  }
+  bindFrameRate(rate) {
+    this.inheritedRateInput = rate;
+    this.resolveTiming();
+  }
+  resolveTiming() {
+    const rate = this.frameRate;
+    const resolved = this.authoredKeyframes.map((key) => ({ at: parseTime(key.at, rate), value: key.value, easing: key.easing })).sort((a, b) => a.at - b.at);
+    this.resolvedKeyframes = resolved.map(({ at, value }) => ({ at, value }));
+    this.repeatDelay = Math.max(0, parseTime(this.repeatDelayInput, rate));
+    this.segments = [];
     for (let i = 1; i < resolved.length; i += 1) {
-      this.segments.push({ from: resolved[i - 1].at, to: resolved[i].at, ease: resolveEasing(resolved[i].easing ?? options.easing) });
+      this.segments.push({ from: resolved[i - 1].at, to: resolved[i].at, ease: resolveEasing(resolved[i].easing ?? this.defaultEasing) });
     }
   }
   /** Content length: the last keyframe's time. */

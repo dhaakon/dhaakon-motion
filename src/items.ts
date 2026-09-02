@@ -1,5 +1,6 @@
 import type { FrameInfo, Transport } from './transport';
 import type { Timeline } from './timeline';
+import type { FrameRateInput } from './time';
 
 /**
  * The shared contract every timeline participant implements: tweens, tracks,
@@ -13,6 +14,8 @@ export interface TimelineItem {
   readonly totalDuration: number;
   /** Write values (and, for timelines, fire cues) for a local time. `ctx` carries direction and, when driven by a transport, frame/transport info. */
   sampleAt(localMs: number, ctx?: RenderContext): void;
+  /** Adopt a parent timeline/transport timebase for authored frame and SMPTE literals. Explicit item rates still win. */
+  bindFrameRate?(rate: FrameRateInput): void;
   /** Clear any "already fired" state (cue `once`, crossing history) so the next sample starts fresh. */
   reset?(): void;
 }

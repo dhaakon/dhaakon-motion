@@ -93,6 +93,24 @@ formatTime(60000, rate, 'timecode');     // '00:01:00;02'
 
 `FrameRates` has presets from `23.976` through `60`, including `29.97df`/`59.94df`. `msToFrame`/`frameToMs` are the plain rational conversion (frame ↔ ms, no drop-frame correction — a frame's actual moment in time never changes); the drop-frame correction lives in `timecodeToFrames`/`framesToTimecode`, which only affects how a frame count is *displayed*. `Tween.frameAt(rate)`/`.timecodeAt(rate)` and `Timeline.frames`/`.timecode()` read the same way.
 
+Tween clock fields use that same vocabulary directly:
+
+```ts
+const graphic = new Tween({
+  from: 0,
+  to: 1,
+  delay: '6f',
+  duration: '00:00:00:18',
+  repeat: 1,
+  repeatDelay: '4f',
+});
+
+const show = new Timeline().add(graphic);
+new Transport({ root: show, frameRate: 24 });
+```
+
+`duration`, `delay`, and `repeatDelay` retain their authored `TimeInput` internally and resolve against the nearest timebase. A tween without `frameRate` inherits its containing timeline/transport rate when attached—even if it was constructed earlier. Set `frameRate` on the tween or a nested timeline to create an intentional local timebase. Public runtime values such as `tween.duration` remain normalized milliseconds.
+
 ## Nested timelines, markers, and cues
 
 Timelines nest — `.add()` accepts another `Timeline` (or a `Track`, see below) exactly like a `Tween`:

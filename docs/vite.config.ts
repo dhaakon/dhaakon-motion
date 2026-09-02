@@ -14,6 +14,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^@dhaakon\/motion\/react$/, replacement: resolve(source, 'react.tsx') },
+      { find: /^@dhaakon\/motion\/testing$/, replacement: resolve(source, 'testing.ts') },
       { find: /^@dhaakon\/motion$/, replacement: resolve(source, 'index.ts') },
     ],
     dedupe: ['react', 'react-dom'],

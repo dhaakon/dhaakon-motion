@@ -1,18 +1,20 @@
 import React from 'react';
-import { CueOptions, TimelinePosition, CueEvent, MotionValueShape, TweenOptions, Tween as Tween$1, EasingFunction, EasingName, MotionStyle, FrameRateInput, TrackOptions, MotionValue, Keyframe, TransportOptions, Clock, TransportOutput, Transport as Transport$1, TransportState, SceneState, ApplySceneOptions, Timeline } from '@dhaakon/motion';
+import { CueOptions, TimelinePosition, CueEvent, MotionValueShape, TweenOptions, Tween as Tween$1, TimeInput, EasingFunction, EasingName, FrameRateInput, MotionStyle, TrackOptions, MotionValue, Keyframe, TransportOptions, Clock, TransportOutput, Transport as Transport$1, TransportState, SceneState, ApplySceneOptions, Timeline } from '@dhaakon/motion';
 export { MotionStyle } from '@dhaakon/motion';
 
 interface MotionTransition {
-    duration?: number;
-    delay?: number;
+    duration?: TimeInput;
+    delay?: TimeInput;
     repeat?: number;
-    repeatDelay?: number;
+    repeatDelay?: TimeInput;
     yoyo?: boolean;
     easing?: EasingFunction | EasingName;
+    frameRate?: FrameRateInput;
 }
 interface MotionConfigValue {
     transition?: MotionTransition;
     reducedMotion?: 'user' | 'always' | 'never';
+    frameRate?: FrameRateInput;
 }
 declare function MotionConfig({ children, ...value }: MotionConfigValue & {
     children: React.ReactNode;
@@ -156,7 +158,7 @@ interface SequenceProps {
     name?: string;
     at?: TimelinePosition;
     repeat?: number;
-    repeatDelay?: number;
+    repeatDelay?: TimeInput;
     yoyo?: boolean;
     frameRate?: FrameRateInput;
     snap?: boolean;
