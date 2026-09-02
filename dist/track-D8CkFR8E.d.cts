@@ -43,7 +43,7 @@ declare function parseTime(input: TimeInput, rate?: FrameRateInput): number;
 /** Format milliseconds for display. `'frames'` and `'timecode'` styles require `rate`. */
 declare function formatTime(ms: number, rate?: FrameRateInput, style?: 'ms' | 'seconds' | 'frames' | 'timecode'): string;
 
-type MotionPrimitive = number | string;
+type MotionPrimitive = number | string | boolean;
 type MotionValueShape = MotionPrimitive | MotionPrimitive[] | {
     [key: string]: MotionValueShape | undefined;
 };
@@ -166,6 +166,109 @@ declare function timecodeToMs(input: string | Timecode, rate: FrameRate): number
 /** Add (or subtract, with a negative count) a number of frames to a timecode. */
 declare function addFrames(tc: Timecode, frames: number, rate: FrameRate): Timecode;
 
+type VelocityShape<T> = T extends number ? number : T extends readonly unknown[] ? {
+    [K in keyof T]: number;
+} : T extends object ? {
+    [K in keyof T]: number;
+} : number;
+interface PhysicsSpringOptions<T = number> {
+    stiffness?: number;
+    damping?: number;
+    mass?: number;
+    velocity?: number | T;
+    restDelta?: number;
+    /** Units per millisecond. */
+    restSpeed?: number;
+    bounce?: number;
+    duration?: TimeInput;
+    frameRate?: FrameRateInput;
+    scheduler?: FrameScheduler;
+}
+interface InertiaOptions<T = number> {
+    velocity?: number | T;
+    power?: number;
+    timeConstant?: number;
+    min?: number;
+    max?: number;
+    bounce?: PhysicsSpringOptions<T> | false;
+    restDelta?: number;
+    modifyTarget?(projected: number): number;
+    scheduler?: FrameScheduler;
+}
+declare abstract class PhysicsItem<T extends MotionValueShape> implements TimelineItem {
+    protected apply?: ((value: T, velocity: T | number, time: number) => void) | undefined;
+    abstract readonly kind: string;
+    name?: string;
+    abstract readonly totalDuration: number;
+    protected frameLoop: FrameScheduler;
+    protected startedAt: number;
+    protected removeFrame?: () => void;
+    protected resolveFinished: (item: this) => void;
+    finished: Promise<this>;
+    elapsed: number;
+    isAnimating: boolean;
+    protected constructor(apply?: ((value: T, velocity: T | number, time: number) => void) | undefined, scheduler_?: FrameScheduler);
+    abstract sampleAt(milliseconds: number): T;
+    play(): this;
+    pause(): this;
+    cancel(): this;
+    seekTime(milliseconds: number): this;
+    private advance;
+}
+interface SpringItemOptions<T extends MotionValueShape> extends PhysicsSpringOptions<T> {
+    from: T;
+    to: T;
+    onUpdate?: (value: T, velocity: T | number, time: number) => void;
+    name?: string;
+    autoplay?: boolean;
+}
+declare class SpringItem<T extends MotionValueShape = number> extends PhysicsItem<T> {
+    readonly kind: "spring";
+    readonly from: T;
+    readonly to: T;
+    readonly initialVelocity: T | number;
+    readonly options: PhysicsSpringOptions<T>;
+    readonly totalDuration: number;
+    value: T;
+    velocity: T | number;
+    constructor(options: SpringItemOptions<T>);
+    sampleAt(milliseconds: number): T;
+}
+interface InertiaItemOptions<T extends MotionValueShape = number> extends InertiaOptions<T> {
+    from: T;
+    onUpdate?: (value: T, velocity: T | number, time: number) => void;
+    name?: string;
+    autoplay?: boolean;
+}
+declare class InertiaItem<T extends MotionValueShape = number> extends PhysicsItem<T> {
+    readonly kind: "inertia";
+    readonly from: T;
+    readonly initialVelocity: T | number;
+    readonly options: InertiaOptions<T>;
+    readonly totalDuration: number;
+    readonly target: T;
+    value: T;
+    velocity: T | number;
+    private boundary?;
+    private crossingTime;
+    private settle?;
+    constructor(options: InertiaItemOptions<T>);
+    sampleAt(milliseconds: number): T;
+}
+declare function springDuration<T extends MotionValueShape>(options?: PhysicsSpringOptions<T> & {
+    from?: T;
+    to?: T;
+    velocity?: T | number;
+}): number;
+declare function stiffnessFor(duration: number, bounce?: number, mass?: number): number;
+declare function rubberband(value: number, min: number, max: number, coefficient?: number, dimension?: number): number;
+declare function clampWithRubberband(value: number, min: number, max: number, coefficient?: number | false, dimension?: number): number;
+declare function projectFling(value: number, velocity: number, timeConstant?: number): number;
+declare function snapTo(points: number[] | {
+    step: number;
+    offset?: number;
+} | ((projected: number) => number), value: number, velocity: number, timeConstant?: number): number;
+
 type TweenState = 'idle' | 'delayed' | 'running' | 'paused' | 'finished' | 'cancelled';
 interface PropertyRange {
     start: number;
@@ -258,6 +361,8 @@ declare class Tween<T extends MotionValueShape = number> implements TimelineItem
     /** The SMPTE timecode for the tween's active time, at `rate`. */
     timecodeAt(rate: FrameRateInput): Timecode;
     getCurrentFrame(fps?: number): number;
+    /** Analytic/numerically differentiated velocity of the current tween value, in units per millisecond. */
+    instantaneousVelocity(): T | number;
     /**
      * A two-keyframe `Track` equivalent to this tween's `from`/`to`/`duration`/`easing`/`repeat`/`repeatDelay`/`direction`.
      * Its `apply` forwards sampled values to this tween's own `onUpdate` (progress is not recomputed — read `value` from the callback).
@@ -274,11 +379,20 @@ declare class MotionValue<T extends MotionValueShape> {
     private current;
     private listeners;
     private animation?;
+    private previous;
+    private previousAt;
+    private explicitVelocity?;
+    private updatedAtValue;
     constructor(current: T);
     get(): T;
-    set(value: T): void;
+    get updatedAt(): number;
+    get velocity(): T | number;
+    set(value: T, time?: number): void;
+    setWithVelocity(value: T, velocity: T | number, time?: number): void;
     subscribe: (listener: () => void) => () => void;
     animate(to: T, options?: Omit<TweenOptions<T>, 'from' | 'to' | 'onUpdate'>): Tween<T>;
+    spring(to: T, options?: PhysicsSpringOptions<T>): SpringItem<T>;
+    decay(options?: InertiaOptions<T>): InertiaItem<T>;
     stop(): void;
 }
 declare function animate<T extends MotionValueShape>(from: T, to: T, options?: Omit<TweenOptions<T>, 'from' | 'to'>): Tween<T>;
@@ -670,4 +784,4 @@ declare class Track<T extends MotionValueShape> implements TimelineItem {
 /** `new Track({ target, keyframes, ...options })`, accepting either a `MotionValue` or a plain setter as the first argument. */
 declare function track<T extends MotionValueShape>(target: MotionValue<T> | ((value: T) => void), keyframes: Keyframe<T>[], options?: Omit<TrackOptions<T>, 'keyframes' | 'apply' | 'target'>): Track<T>;
 
-export { formatTime as $, type FrameTask as A, type Marker as B, type Clock as C, type Direction as D, type EasingInput as E, type FrameRateInput as F, type MotionPrimitive as G, type Timecode as H, type InspectNode as I, type TimelineOptions as J, type Keyframe as K, Line as L, type MotionValueShape as M, type TimelinePosition as N, type Trace as O, type PropertyRange as P, type TraceEntry as Q, type RenderContext as R, type SpringOptions as S, type TimelineItem as T, type TransportOptions as U, type TransportState as V, type TweenState as W, activeDuration as X, addFrames as Y, createTrace as Z, defaultRenderContext as _, type TransportOutput as a, formatTimecode as a0, frameRate as a1, frameToMs as a2, framesToTimecode as a3, interpolate as a4, mix as a5, msToFrame as a6, msToTimecode as a7, parseTime as a8, parseTimecode as a9, registerEasing as aa, resolveEasing as ab, sampleCycle as ac, scheduler as ad, serializeEasing as ae, snapToFrame as af, steps as ag, timecodeToFrames as ah, timecodeToMs as ai, totalDuration as aj, track as ak, type TrackOptions as b, Track as c, Transport as d, Timeline as e, type TimeInput as f, type FrameInfo as g, type CueEvent as h, type TweenOptions as i, MotionValue as j, type EasingFunction as k, Tween as l, animate as m, cubicBezier as n, spring as o, type CueOptions as p, type CycleSample as q, type CycleSpec as r, stagger as s, Easing as t, type EasingName as u, type EasingTuple as v, type FrameDriver as w, type FrameRate as x, FrameRates as y, FrameScheduler as z };
+export { type TransportState as $, type FrameTask as A, InertiaItem as B, type Clock as C, type Direction as D, type EasingInput as E, type FrameRateInput as F, type InertiaItemOptions as G, type InspectNode as H, type InertiaOptions as I, type Marker as J, type Keyframe as K, Line as L, MotionValue as M, type MotionPrimitive as N, type PropertyRange as O, type PhysicsSpringOptions as P, type SpringItemOptions as Q, type RenderContext as R, SpringItem as S, type TimelineItem as T, type SpringOptions as U, type Timecode as V, type TimelineOptions as W, type TimelinePosition as X, type Trace as Y, type TraceEntry as Z, type TransportOptions as _, type TransportOutput as a, type TweenState as a0, type VelocityShape as a1, activeDuration as a2, addFrames as a3, clampWithRubberband as a4, createTrace as a5, defaultRenderContext as a6, formatTime as a7, formatTimecode as a8, frameRate as a9, frameToMs as aa, framesToTimecode as ab, interpolate as ac, mix as ad, msToFrame as ae, msToTimecode as af, parseTime as ag, parseTimecode as ah, projectFling as ai, registerEasing as aj, resolveEasing as ak, rubberband as al, sampleCycle as am, scheduler as an, serializeEasing as ao, snapTo as ap, snapToFrame as aq, springDuration as ar, steps as as, stiffnessFor as at, timecodeToFrames as au, timecodeToMs as av, totalDuration as aw, track as ax, type TrackOptions as b, Track as c, Transport as d, Timeline as e, type TimeInput as f, type FrameInfo as g, type CueEvent as h, type TweenOptions as i, type MotionValueShape as j, type EasingFunction as k, Tween as l, animate as m, cubicBezier as n, spring as o, type CueOptions as p, type CycleSample as q, type CycleSpec as r, stagger as s, Easing as t, type EasingName as u, type EasingTuple as v, type FrameDriver as w, type FrameRate as x, FrameRates as y, FrameScheduler as z };

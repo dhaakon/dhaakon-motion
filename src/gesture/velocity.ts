@@ -19,6 +19,9 @@ export class VelocityEstimator {
   velocity(now = this.samples.at(-1)?.t ?? 0): { x: number; y: number } {
     const latest = this.samples.at(-1);
     if (!latest || now - latest.t > 60) return { x: 0, y: 0 };
+    const previous = this.samples.at(-2);
+    // A pointer-up sample after a stationary pause must not resurrect the speed from before that pause.
+    if (!previous || latest.t - previous.t > 60) return { x: 0, y: 0 };
     this.trim(now);
     if (this.samples.length < 2) return { x: 0, y: 0 };
     let weightSum = 0; let timeMean = 0; let xMean = 0; let yMean = 0;
@@ -38,4 +41,3 @@ export class VelocityEstimator {
   reset() { this.samples.length = 0; }
   private trim(now: number) { while (this.samples.length && now - this.samples[0].t > this.window) this.samples.shift(); }
 }
-

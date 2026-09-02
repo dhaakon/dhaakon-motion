@@ -43,3 +43,17 @@ test('mountInspector accepts a container and starts collapsed on request', () =>
   inspector.unmount();
   container.remove();
 });
+
+test('gesture overlay traces pointers, reports arena claims, and disposes cleanly', () => {
+  const { scheduler } = createTestScheduler();
+  const transport = new Transport({ scheduler, duration: 100 });
+  const inspector = mountInspector(transport, { gestures: true });
+  const move = new MouseEvent('pointermove', { clientX: 40, clientY: 30 });
+  Object.defineProperty(move, 'pointerId', { value: 4 });
+  document.dispatchEvent(move);
+  document.dispatchEvent(new CustomEvent('dhaakon-motion:arena', { detail: { kind: 'pan', priority: 10 } }));
+  expect(document.querySelector('.dhk-gesture-overlay circle')).not.toBeNull();
+  expect(document.querySelector('.dhk-gesture-state')?.textContent).toContain('PAN');
+  inspector.unmount();
+  expect(document.querySelector('.dhk-gesture-overlay')).toBeNull();
+});

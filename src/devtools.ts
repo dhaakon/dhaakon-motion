@@ -6,6 +6,8 @@ export interface MountInspectorOptions {
   container?: HTMLElement;
   collapsed?: boolean;
   theme?: 'ink' | 'paper';
+  /** Draw active pointer trails, their velocity vectors, and the winning gesture arena. */
+  gestures?: boolean;
 }
 
 const STYLE = `
@@ -26,6 +28,11 @@ const STYLE = `
 .dhk-mark{position:absolute;top:0;width:1px;height:8px;background:#d9ff43}
 .dhk-cue{position:absolute;top:0;width:1px;height:8px;background:#ff5a1f}
 .dhk-cue.dhk-cue--fired{background:#ff5a1f;box-shadow:0 0 4px 1px #ff5a1f}
+.dhk-gesture-overlay{position:fixed;inset:0;z-index:2147482999;pointer-events:none;overflow:visible}
+.dhk-gesture-overlay path{fill:none;stroke:#d9ff43;stroke-width:2;vector-effect:non-scaling-stroke}
+.dhk-gesture-overlay line{stroke:#ff5a1f;stroke-width:2;vector-effect:non-scaling-stroke}
+.dhk-gesture-overlay circle{fill:#d9ff43;stroke:#101010;stroke-width:2;vector-effect:non-scaling-stroke}
+.dhk-gesture-state{position:fixed;right:12px;bottom:calc(42vh + 12px);z-index:2147483000;padding:6px 9px;background:#101010;color:#d9ff43;border:1px solid #d9ff43;font:10px/1.2 ui-monospace,monospace;pointer-events:none}
 `;
 
 /** `CSS.escape` isn't available in every test/SSR environment; this covers the identifier-safe subset a cue name needs. */
@@ -66,6 +73,28 @@ export function mountInspector(transport: Transport, options: MountInspectorOpti
   const lanes = el('div', { class: 'dhk-lanes' });
   root.append(bar, lanes);
   container.append(root);
+
+  const gestureDisposers: Array<() => void> = [];
+  if (options.gestures) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('class', 'dhk-gesture-overlay');
+    const state = el('div', { class: 'dhk-gesture-state' }, 'ARENA · IDLE');
+    container.append(svg, state);
+    const trails = new Map<number, Array<{ x: number; y: number; t: number }>>();
+    const redraw = (event: PointerEvent) => {
+      const points = trails.get(event.pointerId) ?? []; points.push({ x: event.clientX, y: event.clientY, t: event.timeStamp }); if (points.length > 20) points.shift(); trails.set(event.pointerId, points);
+      svg.replaceChildren();
+      for (const history of trails.values()) {
+        if (!history.length) continue; const last = history.at(-1)!; const first = history.find((point) => last.t - point.t <= 80) ?? history[0]; const dt = Math.max(1, last.t - first.t); const vx = (last.x - first.x) / dt; const vy = (last.y - first.y) / dt;
+        const path = document.createElementNS(svg.namespaceURI, 'path'); path.setAttribute('d', history.map((point, index) => `${index ? 'L' : 'M'}${point.x},${point.y}`).join(' '));
+        const vector = document.createElementNS(svg.namespaceURI, 'line'); vector.setAttribute('x1', String(last.x)); vector.setAttribute('y1', String(last.y)); vector.setAttribute('x2', String(last.x + vx * 90)); vector.setAttribute('y2', String(last.y + vy * 90));
+        const point = document.createElementNS(svg.namespaceURI, 'circle'); point.setAttribute('cx', String(last.x)); point.setAttribute('cy', String(last.y)); point.setAttribute('r', '5'); svg.append(path, vector, point);
+      }
+    };
+    const finish = (event: PointerEvent) => { redraw(event); setTimeout(() => { trails.delete(event.pointerId); if (!trails.size) svg.replaceChildren(); }, 300); };
+    const arena = (event: Event) => { const detail = (event as CustomEvent<{ kind: string; priority: number }>).detail; state.textContent = `ARENA · ${detail.kind.toUpperCase()} · P${detail.priority}`; };
+    document.addEventListener('pointerdown', redraw as EventListener, true); document.addEventListener('pointermove', redraw as EventListener, true); document.addEventListener('pointerup', finish as EventListener, true); document.addEventListener('pointercancel', finish as EventListener, true); document.addEventListener('dhaakon-motion:arena', arena);
+    gestureDisposers.push(() => { document.removeEventListener('pointerdown', redraw as EventListener, true); document.removeEventListener('pointermove', redraw as EventListener, true); document.removeEventListener('pointerup', finish as EventListener, true); document.removeEventListener('pointercancel', finish as EventListener, true); document.removeEventListener('dhaakon-motion:arena', arena); svg.remove(); state.remove(); });
+  }
 
   let looping = false;
   let collapsed = options.collapsed ?? false;
@@ -184,6 +213,7 @@ export function mountInspector(transport: Transport, options: MountInspectorOpti
       detachStateOutput();
       document.removeEventListener('keydown', onKeydown);
       for (const timer of flashTimers.values()) clearTimeout(timer);
+      gestureDisposers.forEach((dispose) => dispose());
       root.remove();
     },
   };

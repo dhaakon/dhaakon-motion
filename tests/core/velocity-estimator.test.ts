@@ -13,5 +13,7 @@ test('lift rule zeroes stale velocity after a pause', () => {
   estimator.push(0, 0, 0); estimator.push(40, 0, 40);
   expect(estimator.velocity(40).x).toBeCloseTo(1, 6);
   expect(estimator.velocity(101)).toEqual({ x: 0, y: 0 });
-});
 
+  estimator.push(40, 0, 121); // pointer-up sample after an 81ms stationary pause
+  expect(estimator.velocity(121)).toEqual({ x: 0, y: 0 });
+});

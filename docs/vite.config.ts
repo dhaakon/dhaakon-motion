@@ -15,6 +15,7 @@ export default defineConfig({
     alias: [
       { find: /^@dhaakon\/motion\/react$/, replacement: resolve(source, 'react.tsx') },
       { find: /^@dhaakon\/motion\/testing$/, replacement: resolve(source, 'testing.ts') },
+      { find: /^@dhaakon\/motion\/gesture$/, replacement: resolve(source, 'gesture/index.ts') },
       { find: /^@dhaakon\/motion\/three$/, replacement: resolve(source, 'three.ts') },
       { find: /^@dhaakon\/motion$/, replacement: resolve(source, 'index.ts') },
     ],

@@ -234,6 +234,67 @@ inspector.unmount();
 
 `./devtools` is dependency-free and only loaded where you import it — it never ships as part of a production bundle unless a project reaches for it directly.
 
+Pass `{ gestures: true }` to add active pointer trails, velocity vectors, and the winning gesture-arena state to the inspector.
+
+## Touch, gestures, and physics
+
+The dependency-free `./gesture` entry owns Pointer Events, coalesced sampling, weighted velocity estimation, nested gesture arbitration, bounds, rubberbanding, momentum, snapping, keyboard/ARIA behavior, and recording. Values still flow through the same `MotionValue` and scheduler as every other renderer.
+
+```ts
+import { MotionValue } from '@dhaakon/motion';
+import { drag, scrub, transformGesture } from '@dhaakon/motion/gesture';
+
+const x = new MotionValue(0);
+const card = drag(x, element, {
+  axis: 'x', bounds: { min: -240, max: 240 }, elastic: .55,
+  momentum: true, snap: [-240, 0, 240],
+  cues: [{ at: [-120, 120], name: 'dismiss-line' }],
+});
+
+scrub(transport, programMonitor, {
+  pixelsPerFrame: 4, snapToMarkers: true, resumeAfter: true,
+});
+
+transformGesture(viewport, {
+  x: cameraX, y: cameraY, scale: zoom, rotation,
+  scaleBounds: [1, 4], doubleTapZoom: 2.5,
+});
+
+card.dispose();
+```
+
+`MotionValue.velocity` is expressed in units per millisecond. `setWithVelocity()`, `.spring()`, and `.decay()` preserve velocity across tween → grab → inertia → spring handoffs. `SpringItem` and `InertiaItem` are closed-form timeline items, so physics can be sought, nested, serialized in cue sheets, and rendered offline.
+
+React adds the same system without rerendering on each pointer move:
+
+```tsx
+<motion.article
+  drag="x"
+  dragBounds={{ min: -240, max: 240 }}
+  dragElastic={.55}
+  dragMomentum
+  dragSnap={[-240, 0, 240]}
+  whileHover={{ y: -4 }}
+  whileTap={{ scale: .96 }}
+  whileDrag={{ rotate: 3 }}
+  onDragEnd={({ velocity }) => log(velocity.x)}
+/>
+```
+
+The React entry also exports `useGesture`, `useDrag`, `usePinch`, `useScrub`, `useDragControls`, `useVelocity`, `useIsPressed`, and `useIsHovered`. Draggables install focusable slider/draggable semantics and arrow, Shift+arrow, Home/End, Escape, Space, and Enter equivalents; reduced-motion preferences disable fling and resolve snaps immediately.
+
+Record a performance and turn it into portable animation data:
+
+```ts
+import { record, replay, gestureToTrack } from '@dhaakon/motion/gesture';
+
+const take = record(fader, { normalize: true, frameRate: 24 });
+const recording = take.stop();
+await replay(recording, fader);
+const automation = gestureToTrack(recording, { frameRate: 24, axis: 'y', simplify: 2 });
+show.add(automation, 'PERFORMER-IN');
+```
+
 ## React
 
 ```tsx

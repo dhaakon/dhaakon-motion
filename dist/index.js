@@ -480,6 +480,291 @@ function track(target, keyframes, options = {}) {
   return target instanceof MotionValue ? new Track({ ...options, keyframes, target }) : new Track({ ...options, keyframes, apply: target });
 }
 
+// src/physics.ts
+function springConstants(options, distance = 1) {
+  const mass = Math.max(1e-4, options.mass ?? 1);
+  const bounce = Math.max(0, Math.min(1, options.bounce ?? 0));
+  const duration = options.duration == null ? void 0 : Math.max(1, parseTime(options.duration, frameRate(options.frameRate ?? 60)));
+  const stiffness = duration == null ? Math.max(1e-4, options.stiffness ?? 170) : stiffnessFor(duration, bounce, mass);
+  const damping = options.damping ?? (duration == null ? 26 : 2 * (1 - bounce * 0.82) * Math.sqrt(stiffness * mass));
+  return { mass, stiffness, damping: Math.max(0, damping), distance };
+}
+function scalarSpring(from, to, velocityMs, milliseconds, options) {
+  const t = Math.max(0, milliseconds) / 1e3;
+  const v0 = velocityMs * 1e3;
+  const y0 = from - to;
+  const { mass, stiffness, damping } = springConstants(options, Math.abs(y0));
+  const omega0 = Math.sqrt(stiffness / mass);
+  const alpha = damping / (2 * mass);
+  let y;
+  let velocity;
+  if (alpha < omega0 - 1e-7) {
+    const wd = Math.sqrt(omega0 * omega0 - alpha * alpha);
+    const b = (v0 + alpha * y0) / wd;
+    const cos = Math.cos(wd * t);
+    const sin = Math.sin(wd * t);
+    const decay = Math.exp(-alpha * t);
+    y = decay * (y0 * cos + b * sin);
+    velocity = decay * ((-alpha * y0 + b * wd) * cos + (-alpha * b - y0 * wd) * sin);
+  } else if (alpha > omega0 + 1e-7) {
+    const root = Math.sqrt(alpha * alpha - omega0 * omega0);
+    const r1 = -alpha + root;
+    const r2 = -alpha - root;
+    const a = (v0 - r2 * y0) / (r1 - r2);
+    const b = y0 - a;
+    y = a * Math.exp(r1 * t) + b * Math.exp(r2 * t);
+    velocity = a * r1 * Math.exp(r1 * t) + b * r2 * Math.exp(r2 * t);
+  } else {
+    const b = v0 + alpha * y0;
+    const decay = Math.exp(-alpha * t);
+    y = (y0 + b * t) * decay;
+    velocity = (b - alpha * (y0 + b * t)) * decay;
+  }
+  return { value: to + y, velocity: velocity / 1e3 };
+}
+function numericVelocity(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+function mapSpring(from, to, velocity, time, options) {
+  if (typeof from === "number" && typeof to === "number") return scalarSpring(from, to, numericVelocity(velocity), time, options);
+  if (Array.isArray(from) && Array.isArray(to)) {
+    const states = from.map((item, index) => mapSpring(item, to[index] ?? item, Array.isArray(velocity) ? velocity[index] : 0, time, options));
+    return { value: states.map((state) => state.value), velocity: states.map((state) => state.velocity) };
+  }
+  if (from && to && typeof from === "object" && typeof to === "object") {
+    const values = {};
+    const velocities = {};
+    const v = velocity && typeof velocity === "object" ? velocity : {};
+    for (const key of /* @__PURE__ */ new Set([...Object.keys(from), ...Object.keys(to)])) {
+      const a = from[key];
+      const b = to[key];
+      if (a == null || b == null) {
+        values[key] = b ?? a;
+        velocities[key] = 0;
+        continue;
+      }
+      const state = mapSpring(a, b, v[key], time, options);
+      values[key] = state.value;
+      velocities[key] = state.velocity;
+    }
+    return { value: values, velocity: velocities };
+  }
+  return { value: time <= 0 ? from : to, velocity: 0 };
+}
+function maxMagnitude(value) {
+  if (typeof value === "number") return Math.abs(value);
+  if (Array.isArray(value)) return Math.max(0, ...value.map(maxMagnitude));
+  if (value && typeof value === "object") return Math.max(0, ...Object.values(value).map(maxMagnitude));
+  return 0;
+}
+function difference(a, b) {
+  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b);
+  if (Array.isArray(a) && Array.isArray(b)) return Math.max(0, ...a.map((v, i) => difference(v, b[i])));
+  if (a && b && typeof a === "object" && typeof b === "object") return Math.max(0, ...Object.keys(a).map((key) => difference(a[key], b[key])));
+  return Object.is(a, b) ? 0 : Infinity;
+}
+var PhysicsItem = class {
+  constructor(apply, scheduler_) {
+    this.apply = apply;
+    this.frameLoop = scheduler_ ?? scheduler;
+    this.finished = new Promise((resolve) => {
+      this.resolveFinished = resolve;
+    });
+  }
+  apply;
+  name;
+  frameLoop;
+  startedAt = 0;
+  removeFrame;
+  resolveFinished;
+  finished;
+  elapsed = 0;
+  isAnimating = false;
+  play() {
+    if (this.isAnimating) return this;
+    this.isAnimating = true;
+    this.startedAt = this.frameLoop.now() - this.elapsed;
+    this.removeFrame = this.frameLoop.add(this.advance);
+    return this;
+  }
+  pause() {
+    this.removeFrame?.();
+    this.isAnimating = false;
+    return this;
+  }
+  cancel() {
+    this.removeFrame?.();
+    this.isAnimating = false;
+    this.resolveFinished(this);
+    return this;
+  }
+  seekTime(milliseconds) {
+    this.elapsed = Math.max(0, Math.min(this.totalDuration, milliseconds));
+    this.sampleAt(this.elapsed);
+    if (this.isAnimating) this.startedAt = this.frameLoop.now() - this.elapsed;
+    return this;
+  }
+  advance = (time) => {
+    this.elapsed = Math.min(this.totalDuration, Math.max(0, time - this.startedAt));
+    this.sampleAt(this.elapsed);
+    if (this.elapsed < this.totalDuration) return true;
+    this.isAnimating = false;
+    this.resolveFinished(this);
+    return false;
+  };
+};
+var SpringItem = class extends PhysicsItem {
+  kind = "spring";
+  from;
+  to;
+  initialVelocity;
+  options;
+  totalDuration;
+  value;
+  velocity;
+  constructor(options) {
+    super(options.onUpdate, options.scheduler);
+    this.name = options.name;
+    this.from = options.from;
+    this.to = options.to;
+    this.initialVelocity = options.velocity ?? 0;
+    this.options = options;
+    this.value = this.from;
+    this.velocity = this.initialVelocity;
+    this.totalDuration = springDuration({ ...options, from: this.from, to: this.to, velocity: this.initialVelocity });
+    if (options.autoplay) queueMicrotask(() => this.play());
+  }
+  sampleAt(milliseconds) {
+    const time = Math.max(0, Math.min(this.totalDuration, milliseconds));
+    const state = mapSpring(this.from, this.to, this.initialVelocity, time, this.options);
+    if (time >= this.totalDuration) {
+      this.value = this.to;
+      this.velocity = 0;
+    } else {
+      this.value = state.value;
+      this.velocity = state.velocity;
+    }
+    this.apply?.(this.value, this.velocity, time);
+    return this.value;
+  }
+};
+var InertiaItem = class extends PhysicsItem {
+  kind = "inertia";
+  from;
+  initialVelocity;
+  options;
+  totalDuration;
+  target;
+  value;
+  velocity;
+  boundary;
+  crossingTime = 0;
+  settle;
+  constructor(options) {
+    super(options.onUpdate, options.scheduler);
+    this.name = options.name;
+    this.from = options.from;
+    this.initialVelocity = options.velocity ?? 0;
+    this.options = options;
+    this.value = this.from;
+    this.velocity = this.initialVelocity;
+    const tau = Math.max(1, options.timeConstant ?? 325);
+    const power = options.power ?? 0.8;
+    if (typeof this.from === "number") {
+      const projected = projectFling(this.from, numericVelocity(this.initialVelocity) * power, tau);
+      const modified = options.modifyTarget?.(projected) ?? projected;
+      this.target = modified;
+      const bound = modified < (options.min ?? -Infinity) ? options.min : modified > (options.max ?? Infinity) ? options.max : void 0;
+      if (bound != null && options.bounce !== false) {
+        this.boundary = bound;
+        const distance = bound - this.from;
+        const full = numericVelocity(this.initialVelocity) * power * tau;
+        const ratio = full === 0 ? 1 : Math.max(0, Math.min(0.999999, distance / full));
+        this.crossingTime = Math.max(0, -tau * Math.log(1 - ratio));
+        const crossingVelocity = numericVelocity(this.initialVelocity) * power * Math.exp(-this.crossingTime / tau);
+        this.settle = new SpringItem({ from: bound, to: bound, velocity: crossingVelocity, ...typeof options.bounce === "object" ? options.bounce : {}, scheduler: options.scheduler });
+      }
+    } else this.target = this.from;
+    const rest = Math.max(1e-5, options.restDelta ?? 0.01);
+    const v = Math.abs(numericVelocity(this.initialVelocity) * power);
+    const decayDuration = v <= rest ? 0 : Math.max(0, tau * Math.log(v / rest));
+    this.totalDuration = this.settle ? this.crossingTime + this.settle.totalDuration : decayDuration;
+    if (options.autoplay) queueMicrotask(() => this.play());
+  }
+  sampleAt(milliseconds) {
+    const time = Math.max(0, Math.min(this.totalDuration, milliseconds));
+    if (typeof this.from !== "number") {
+      this.apply?.(this.value, this.velocity, time);
+      return this.value;
+    }
+    if (this.settle && this.boundary != null && time >= this.crossingTime) {
+      this.value = this.settle.sampleAt(time - this.crossingTime);
+      this.velocity = this.settle.velocity;
+    } else {
+      const tau = Math.max(1, this.options.timeConstant ?? 325);
+      const v0 = numericVelocity(this.initialVelocity) * (this.options.power ?? 0.8);
+      this.value = this.from + v0 * tau * (1 - Math.exp(-time / tau));
+      this.velocity = v0 * Math.exp(-time / tau);
+      if (!this.settle && time >= this.totalDuration) {
+        this.value = this.target;
+        this.velocity = 0;
+      }
+    }
+    this.apply?.(this.value, this.velocity, time);
+    return this.value;
+  }
+};
+function springDuration(options = {}) {
+  const from = options.from ?? 0;
+  const to = options.to ?? 1;
+  const restDelta = options.restDelta ?? 0.01;
+  const restSpeed = options.restSpeed ?? 0.01;
+  let previous = 0;
+  for (let time = 0; time <= 2e4; time += 4) {
+    const state = mapSpring(from, to, options.velocity ?? 0, time, options);
+    if (difference(state.value, to) <= restDelta && maxMagnitude(state.velocity) <= restSpeed) {
+      let low = previous;
+      let high = time;
+      for (let i = 0; i < 12; i += 1) {
+        const mid = (low + high) / 2;
+        const sample = mapSpring(from, to, options.velocity ?? 0, mid, options);
+        if (difference(sample.value, to) <= restDelta && maxMagnitude(sample.velocity) <= restSpeed) high = mid;
+        else low = mid;
+      }
+      return high;
+    }
+    previous = time;
+  }
+  return 2e4;
+}
+function stiffnessFor(duration, bounce = 0, mass = 1) {
+  const seconds = Math.max(1e-3, duration / 1e3);
+  const dampingRatio = Math.max(0.08, 1 - Math.max(0, Math.min(1, bounce)) * 0.82);
+  return mass * (Math.log(100) / (dampingRatio * seconds)) ** 2;
+}
+function rubberband(value, min, max, coefficient = 0.55, dimension = 300) {
+  if (value >= min && value <= max) return value;
+  const boundary = value < min ? min : max;
+  const distance = Math.abs(value - boundary);
+  const resisted = (1 - 1 / (distance * coefficient / Math.max(1, dimension) + 1)) * Math.max(1, dimension);
+  return boundary + Math.sign(value - boundary) * resisted;
+}
+function clampWithRubberband(value, min, max, coefficient = 0.55, dimension = 300) {
+  return coefficient === false ? Math.max(min, Math.min(max, value)) : rubberband(value, min, max, coefficient, dimension);
+}
+function projectFling(value, velocity, timeConstant = 325) {
+  return value + velocity * timeConstant;
+}
+function snapTo(points, value, velocity, timeConstant = 325) {
+  const projected = projectFling(value, velocity, timeConstant);
+  if (typeof points === "function") return points(projected);
+  if (!Array.isArray(points)) {
+    const offset = points.offset ?? 0;
+    return Math.round((projected - offset) / points.step) * points.step + offset;
+  }
+  return points.reduce((nearest, point) => Math.abs(point - projected) < Math.abs(nearest - projected) ? point : nearest, points[0] ?? value);
+}
+
 // src/core.ts
 var Line = class {
   curves;
@@ -656,6 +941,16 @@ var Tween = class {
   getCurrentFrame(fps = 60) {
     return this.frameAt(fps);
   }
+  /** Analytic/numerically differentiated velocity of the current tween value, in units per millisecond. */
+  instantaneousVelocity() {
+    if (this.duration <= 0) return 0;
+    const epsilon = 1e-4;
+    const before = this.easing(Math.max(0, this.progress - epsilon));
+    const after = this.easing(Math.min(1, this.progress + epsilon));
+    const span = Math.min(1, this.progress + epsilon) - Math.max(0, this.progress - epsilon);
+    const slope = span > 0 ? (after - before) / span : 0;
+    return scaleVelocity(velocityBetween(this.from, this.toValue, this.duration), slope);
+  }
   /**
    * A two-keyframe `Track` equivalent to this tween's `from`/`to`/`duration`/`easing`/`repeat`/`repeatDelay`/`direction`.
    * Its `apply` forwards sampled values to this tween's own `onUpdate` (progress is not recomputed — read `value` from the callback).
@@ -720,17 +1015,46 @@ var Tween = class {
 var MotionValue = class {
   constructor(current) {
     this.current = current;
+    this.previous = current;
+    this.updatedAtValue = scheduler.now();
+    this.previousAt = this.updatedAtValue;
   }
   current;
   listeners = /* @__PURE__ */ new Set();
   animation;
+  previous;
+  previousAt;
+  explicitVelocity;
+  updatedAtValue;
   get() {
     return this.current;
   }
-  set(value) {
-    if (Object.is(value, this.current)) return;
+  get updatedAt() {
+    return this.updatedAtValue;
+  }
+  get velocity() {
+    if (this.explicitVelocity !== void 0) return this.explicitVelocity;
+    const elapsed = this.updatedAt - this.previousAt;
+    if (elapsed <= 0 || elapsed > 50) return 0;
+    return velocityBetween(this.previous, this.current, elapsed);
+  }
+  set(value, time = scheduler.now()) {
+    const changed = !Object.is(value, this.current);
+    this.previous = this.current;
+    this.previousAt = this.updatedAt;
     this.current = value;
-    for (const listener of this.listeners) listener();
+    this.updatedAtValue = time;
+    this.explicitVelocity = void 0;
+    if (changed) for (const listener of this.listeners) listener();
+  }
+  setWithVelocity(value, velocity, time = scheduler.now()) {
+    const changed = !Object.is(value, this.current);
+    this.previous = this.current;
+    this.previousAt = this.updatedAt;
+    this.current = value;
+    this.updatedAtValue = time;
+    this.explicitVelocity = velocity;
+    if (changed) for (const listener of this.listeners) listener();
   }
   subscribe = (listener) => {
     this.listeners.add(listener);
@@ -740,14 +1064,47 @@ var MotionValue = class {
   };
   animate(to, options = {}) {
     this.stop();
-    this.animation = new Tween({ ...options, from: this.current, to, onUpdate: (value) => this.set(value) }).play();
-    return this.animation;
+    const tween = new Tween({ ...options, from: this.current, to, onUpdate: (value, _progress, active) => this.setWithVelocity(value, active.instantaneousVelocity(), active.elapsed) }).play();
+    this.animation = tween;
+    return tween;
+  }
+  spring(to, options = {}) {
+    this.stop();
+    const item = new SpringItem({ ...options, from: this.current, to, velocity: options.velocity ?? this.velocity, onUpdate: (value, velocity, time) => this.setWithVelocity(value, velocity, time), autoplay: true });
+    this.animation = item;
+    return item;
+  }
+  decay(options = {}) {
+    this.stop();
+    const item = new InertiaItem({ ...options, from: this.current, velocity: options.velocity ?? this.velocity, onUpdate: (value, velocity, time) => this.setWithVelocity(value, velocity, time), autoplay: true });
+    this.animation = item;
+    return item;
   }
   stop() {
     this.animation?.cancel();
     this.animation = void 0;
   }
 };
+function velocityBetween(from, to, milliseconds) {
+  if (typeof from === "number" && typeof to === "number") return (to - from) / milliseconds;
+  if (Array.isArray(from) && Array.isArray(to)) return from.map((value, index) => velocityBetween(value, to[index] ?? value, milliseconds));
+  if (from && to && typeof from === "object" && typeof to === "object") {
+    const output = {};
+    for (const key of /* @__PURE__ */ new Set([...Object.keys(from), ...Object.keys(to)])) {
+      const a = from[key];
+      const b = to[key];
+      output[key] = a == null || b == null ? 0 : velocityBetween(a, b, milliseconds);
+    }
+    return output;
+  }
+  return 0;
+}
+function scaleVelocity(value, scale) {
+  if (typeof value === "number") return value * scale;
+  if (Array.isArray(value)) return value.map((entry) => scaleVelocity(entry, scale));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, scaleVelocity(entry, scale)]));
+  return 0;
+}
 function animate(from, to, options = {}) {
   return new Tween({ ...options, from, to }).play();
 }
@@ -1713,6 +2070,20 @@ function buildItem(item, bindings, strict, path, rate) {
   if (item.type === "timeline") {
     return buildTimeline(item, bindings, strict, path, rate);
   }
+  if (item.type === "spring") {
+    const spring_ = item;
+    const write = resolveTarget(spring_.target, bindings, strict, path);
+    const spring2 = new SpringItem({ ...spring_, frameRate: rate, onUpdate: write ? (value) => write(value) : void 0 });
+    if (spring_.target) targetKeys.set(spring2, spring_.target);
+    return spring2;
+  }
+  if (item.type === "inertia") {
+    const inertia_ = item;
+    const write = resolveTarget(inertia_.target, bindings, strict, path);
+    const inertia = new InertiaItem({ ...inertia_, onUpdate: write ? (value) => write(value) : void 0 });
+    if (inertia_.target) targetKeys.set(inertia, inertia_.target);
+    return inertia;
+  }
   const built = bindings.createItem?.(item, { bindings, strict });
   if (built) return built;
   const message = `${path}: unknown item type "${item.type}"`;
@@ -1819,6 +2190,14 @@ function saveItem(item, at) {
       keyframes: item.keyframes.map((k) => ({ at: k.at, value: k.value }))
     };
   }
+  if (item instanceof SpringItem) {
+    const options = item.options;
+    return { type: "spring", ...item.name ? { name: item.name } : {}, at, ...target ? { target } : {}, from: item.from, to: item.to, velocity: item.initialVelocity, ...options.stiffness != null ? { stiffness: options.stiffness } : {}, ...options.damping != null ? { damping: options.damping } : {}, ...options.mass != null ? { mass: options.mass } : {}, ...options.restDelta != null ? { restDelta: options.restDelta } : {}, ...options.restSpeed != null ? { restSpeed: options.restSpeed } : {}, ...options.bounce != null ? { bounce: options.bounce } : {}, ...options.duration != null ? { duration: options.duration } : {} };
+  }
+  if (item instanceof InertiaItem) {
+    const options = item.options;
+    return { type: "inertia", ...item.name ? { name: item.name } : {}, at, ...target ? { target } : {}, from: item.from, velocity: item.initialVelocity, ...options.power != null ? { power: options.power } : {}, ...options.timeConstant != null ? { timeConstant: options.timeConstant } : {}, ...options.min != null ? { min: options.min } : {}, ...options.max != null ? { max: options.max } : {}, ...options.restDelta != null ? { restDelta: options.restDelta } : {} };
+  }
   return { type: item.kind, ...item.name ? { name: item.name } : {}, at };
 }
 function validateSheet(input) {
@@ -1897,6 +2276,12 @@ function validateItem(item, path, push) {
     }
     if (!Array.isArray(value.items)) push(`${path}.items`, "must be an array");
     else value.items.forEach((child, index) => validateItem(child, `${path}.items[${index}]`, push));
+  } else if (value.type === "spring") {
+    if (value.from === void 0) push(`${path}.from`, "is required");
+    if (value.to === void 0) push(`${path}.to`, "is required");
+  } else if (value.type === "inertia") {
+    if (typeof value.from !== "number") push(`${path}.from`, "must be a number");
+    if (typeof value.velocity !== "number") push(`${path}.velocity`, "must be a number");
   }
 }
 function writerFor(target) {
@@ -1972,9 +2357,11 @@ export {
   Easing,
   FrameRates,
   FrameScheduler,
+  InertiaItem,
   Line,
   MotionValue,
   OfflineTransport,
+  SpringItem,
   Timeline,
   Track,
   Transport,
@@ -1984,6 +2371,7 @@ export {
   animate,
   applyScene,
   captureScene,
+  clampWithRubberband,
   createTrace,
   cubicBezier,
   src_default as default,
@@ -2002,10 +2390,12 @@ export {
   msToTimecode,
   parseTime,
   parseTimecode,
+  projectFling,
   readStyle,
   registerEasing,
   renderFrames,
   resolveEasing,
+  rubberband,
   sampleCycle,
   saveSheet,
   sceneSheet,
@@ -2013,10 +2403,13 @@ export {
   scheduler,
   serializeEasing,
   signalOutput,
+  snapTo,
   snapToFrame,
   spring,
+  springDuration,
   stagger,
   steps,
+  stiffnessFor,
   styleTrack,
   timecodeToFrames,
   timecodeToMs,

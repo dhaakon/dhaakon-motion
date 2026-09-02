@@ -33,12 +33,18 @@ __export(testing_exports, {
   fakeAudioContext: () => fakeAudioContext,
   fakeMidiPort: () => fakeMidiPort,
   fakeOfflineAudioContext: () => fakeOfflineAudioContext,
+  fling: () => fling,
   installFrameDriver: () => installFrameDriver,
+  installPointerEvents: () => installPointerEvents,
+  measureLatency: () => measureLatency,
+  pointer: () => pointer,
   recordValues: () => recordValues,
+  replayGesture: () => replayGesture,
   runUntil: () => runUntil,
   sample: () => sample,
   snapshotTimeline: () => snapshotTimeline,
-  stepFrames: () => stepFrames
+  stepFrames: () => stepFrames,
+  stroke: () => stroke
 });
 module.exports = __toCommonJS(testing_exports);
 
@@ -671,6 +677,16 @@ var Tween = class {
   getCurrentFrame(fps = 60) {
     return this.frameAt(fps);
   }
+  /** Analytic/numerically differentiated velocity of the current tween value, in units per millisecond. */
+  instantaneousVelocity() {
+    if (this.duration <= 0) return 0;
+    const epsilon = 1e-4;
+    const before = this.easing(Math.max(0, this.progress - epsilon));
+    const after = this.easing(Math.min(1, this.progress + epsilon));
+    const span = Math.min(1, this.progress + epsilon) - Math.max(0, this.progress - epsilon);
+    const slope = span > 0 ? (after - before) / span : 0;
+    return scaleVelocity(velocityBetween(this.from, this.toValue, this.duration), slope);
+  }
   /**
    * A two-keyframe `Track` equivalent to this tween's `from`/`to`/`duration`/`easing`/`repeat`/`repeatDelay`/`direction`.
    * Its `apply` forwards sampled values to this tween's own `onUpdate` (progress is not recomputed — read `value` from the callback).
@@ -732,6 +748,26 @@ var Tween = class {
     });
   }
 };
+function velocityBetween(from, to, milliseconds) {
+  if (typeof from === "number" && typeof to === "number") return (to - from) / milliseconds;
+  if (Array.isArray(from) && Array.isArray(to)) return from.map((value, index) => velocityBetween(value, to[index] ?? value, milliseconds));
+  if (from && to && typeof from === "object" && typeof to === "object") {
+    const output = {};
+    for (const key of /* @__PURE__ */ new Set([...Object.keys(from), ...Object.keys(to)])) {
+      const a = from[key];
+      const b = to[key];
+      output[key] = a == null || b == null ? 0 : velocityBetween(a, b, milliseconds);
+    }
+    return output;
+  }
+  return 0;
+}
+function scaleVelocity(value, scale) {
+  if (typeof value === "number") return value * scale;
+  if (Array.isArray(value)) return value.map((entry) => scaleVelocity(entry, scale));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, scaleVelocity(entry, scale)]));
+  return 0;
+}
 
 // src/items.ts
 var defaultRenderContext = { direction: 1, fireCues: true };
@@ -1500,6 +1536,31 @@ function defaultOnError(err) {
   console.error(err);
 }
 
+// src/gesture/record.ts
+function dispatchSample(sample2, element, recording) {
+  const rect = element.getBoundingClientRect();
+  const normalized = recording.element && sample2.x >= 0 && sample2.x <= 1 && sample2.y >= 0 && sample2.y <= 1;
+  const x = normalized ? rect.left + sample2.x * rect.width : sample2.x;
+  const y = normalized ? rect.top + sample2.y * rect.height : sample2.y;
+  const event = new PointerEvent(`pointer${sample2.kind === "cancel" ? "cancel" : sample2.kind}`, { bubbles: true, cancelable: true, pointerId: sample2.id, pointerType: sample2.type, clientX: x, clientY: y, pressure: sample2.pressure ?? 0, button: 0, buttons: sample2.kind === "up" || sample2.kind === "cancel" ? 0 : 1 });
+  Object.defineProperty(event, "timeStamp", { value: sample2.t });
+  element.dispatchEvent(event);
+}
+async function replay(recording, element, options = {}) {
+  const speed = Math.max(1e-4, options.speed ?? 1);
+  const from = options.from ?? -Infinity;
+  const to = options.to ?? Infinity;
+  const samples = recording.samples.filter((sample2) => sample2.t >= from && sample2.t <= to);
+  let previous = samples[0]?.t ?? 0;
+  for (const sample2 of samples) {
+    const delay = (sample2.t - previous) / speed;
+    if (options.driver) options.driver.advance(delay);
+    else if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    dispatchSample(sample2, element, recording);
+    previous = sample2.t;
+  }
+}
+
 // src/testing.ts
 var ManualDriver = class {
   time = 0;
@@ -1605,6 +1666,126 @@ ${mismatches.join("\n")}
 ${timeline.toAscii()}`);
   }
 }
+function installPointerEvents() {
+  const scope = globalThis;
+  const previous = scope.PointerEvent;
+  const elementPrototype = globalThis.Element?.prototype;
+  const previousSet = elementPrototype?.setPointerCapture;
+  const previousRelease = elementPrototype?.releasePointerCapture;
+  const previousHas = elementPrototype?.hasPointerCapture;
+  if (!scope.PointerEvent) {
+    class TestPointerEvent extends MouseEvent {
+      pointerId;
+      pointerType;
+      pressure;
+      isPrimary;
+      constructor(type, init = {}) {
+        super(type, init);
+        this.pointerId = init.pointerId ?? 1;
+        this.pointerType = init.pointerType ?? "mouse";
+        this.pressure = init.pressure ?? 0;
+        this.isPrimary = init.isPrimary ?? true;
+      }
+      getCoalescedEvents() {
+        return [this];
+      }
+      getPredictedEvents() {
+        return [];
+      }
+    }
+    scope.PointerEvent = TestPointerEvent;
+  }
+  const captures = /* @__PURE__ */ new WeakMap();
+  if (elementPrototype && !elementPrototype.setPointerCapture) elementPrototype.setPointerCapture = function(id) {
+    const set = captures.get(this) ?? /* @__PURE__ */ new Set();
+    set.add(id);
+    captures.set(this, set);
+  };
+  if (elementPrototype && !elementPrototype.releasePointerCapture) elementPrototype.releasePointerCapture = function(id) {
+    captures.get(this)?.delete(id);
+  };
+  if (elementPrototype && !elementPrototype.hasPointerCapture) elementPrototype.hasPointerCapture = function(id) {
+    return captures.get(this)?.has(id) ?? false;
+  };
+  return () => {
+    if (previous) scope.PointerEvent = previous;
+    else Reflect.deleteProperty(scope, "PointerEvent");
+    if (elementPrototype) {
+      elementPrototype.setPointerCapture = previousSet;
+      elementPrototype.releasePointerCapture = previousRelease;
+      elementPrototype.hasPointerCapture = previousHas;
+    }
+  };
+}
+function pointer(element, options = {}) {
+  const id = options.id ?? 1;
+  const type = options.type ?? "touch";
+  let last = { x: 0, y: 0, t: 0 };
+  const dispatch = (kind, x, y, t) => {
+    last = { x, y, t };
+    const name = `pointer${kind === "cancel" ? "cancel" : kind}`;
+    const event = new PointerEvent(name, { bubbles: true, cancelable: true, pointerId: id, pointerType: type, clientX: x, clientY: y, button: 0, buttons: kind === "up" || kind === "cancel" ? 0 : 1, isPrimary: id === 1 });
+    Object.defineProperty(event, "timeStamp", { value: t });
+    if (options.coalesced?.length && kind === "move") Object.defineProperty(event, "getCoalescedEvents", { value: () => options.coalesced.map(([cx, cy, ct]) => {
+      const sample2 = new PointerEvent("pointermove", { pointerId: id, pointerType: type, clientX: cx, clientY: cy, buttons: 1 });
+      Object.defineProperty(sample2, "timeStamp", { value: ct });
+      return sample2;
+    }) });
+    element.dispatchEvent(event);
+    return event;
+  };
+  return {
+    down(x, y, t = 0) {
+      return dispatch("down", x, y, t);
+    },
+    move(x, y, t = last.t + 16) {
+      return dispatch("move", x, y, t);
+    },
+    up(x = last.x, y = last.y, t = last.t + 16) {
+      return dispatch("up", x, y, t);
+    },
+    cancel() {
+      return dispatch("cancel", last.x, last.y, last.t);
+    }
+  };
+}
+async function stroke(element, points, options = {}) {
+  if (!points.length) return;
+  const stream = pointer(element, options);
+  stream.down(...points[0]);
+  points.slice(1).forEach(([x, y, t]) => stream.move(x, y, t));
+  const last = points.at(-1);
+  stream.up(last[0], last[1], last[2]);
+}
+async function fling(element, options) {
+  const duration = options.duration ?? 96;
+  const frames = Math.max(2, Math.round(duration / 16));
+  const stream = pointer(element, { id: options.id, type: options.type });
+  stream.down(options.from[0], options.from[1], 0);
+  for (let index = 1; index <= frames; index += 1) {
+    const t = duration * index / frames;
+    stream.move(options.from[0] + options.velocity[0] * t, options.from[1] + options.velocity[1] * t, t);
+  }
+  stream.up(void 0, void 0, duration);
+}
+var replayGesture = replay;
+function measureLatency(element, motionValue) {
+  return new Promise((resolve) => {
+    let eventTime = 0;
+    let removeValue = () => {
+    };
+    const onEvent = (event) => {
+      eventTime = event.timeStamp;
+      removeValue = motionValue.subscribe(() => {
+        const writeTime = globalThis.performance?.now?.() ?? Date.now();
+        removeValue();
+        element.removeEventListener("pointermove", onEvent);
+        resolve({ eventToWrite: Math.max(0, writeTime - eventTime) });
+      });
+    };
+    element.addEventListener("pointermove", onEvent, { once: true });
+  });
+}
 var FakeAudioParam = class {
   value = 0;
   calls = [];
@@ -1709,11 +1890,17 @@ function fakeMidiPort() {
   fakeAudioContext,
   fakeMidiPort,
   fakeOfflineAudioContext,
+  fling,
   installFrameDriver,
+  installPointerEvents,
+  measureLatency,
+  pointer,
   recordValues,
+  replayGesture,
   runUntil,
   sample,
   snapshotTimeline,
-  stepFrames
+  stepFrames,
+  stroke
 });
 //# sourceMappingURL=testing.cjs.map

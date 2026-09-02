@@ -10,6 +10,8 @@ import {
 } from '@dhaakon/motion/react';
 import { expectSample, snapshotTimeline } from '@dhaakon/motion/testing';
 
+export { GestureGallery, GestureProductionLabs, gestureBenchmarks } from './GestureLabs';
+
 const control = (label: string, action: () => void, accent = false) =>
   <Button variant={accent ? 'accent' : 'outline'} size="sm" onClick={action}>{label}</Button>;
 

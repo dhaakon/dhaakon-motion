@@ -186,7 +186,7 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
 }
 
 export class MotionValue<T extends MotionValueShape> {
-  private listeners = new Set<() => void>(); private animation?: Tween<T>;
+  private listeners = new Set<() => void>(); private animation?: { cancel(): unknown };
   private previous: T; private previousAt: number; private explicitVelocity?: T | number;
   private updatedAtValue: number;
   constructor(private current: T) { this.previous = current; this.updatedAtValue = scheduler.now(); this.previousAt = this.updatedAtValue; }
@@ -213,9 +213,9 @@ export class MotionValue<T extends MotionValueShape> {
     if (changed) for (const listener of this.listeners) listener();
   }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
-  animate(to: T, options: Omit<TweenOptions<T>, 'from' | 'to' | 'onUpdate'> = {}) { this.stop(); this.animation = new Tween({ ...options, from: this.current, to, onUpdate: (value, _progress, tween) => this.setWithVelocity(value, tween.instantaneousVelocity(), tween.elapsed) }).play(); return this.animation; }
-  spring(to: T, options: PhysicsSpringOptions<T> = {}) { this.stop(); return new SpringItem<T>({ ...options, from: this.current, to, velocity: options.velocity ?? this.velocity, onUpdate: (value, velocity, time) => this.setWithVelocity(value, velocity, time), autoplay: true }); }
-  decay(options: InertiaOptions<T> = {}) { this.stop(); return new InertiaItem<T>({ ...options, from: this.current, velocity: options.velocity ?? this.velocity, onUpdate: (value, velocity, time) => this.setWithVelocity(value, velocity, time), autoplay: true }); }
+  animate(to: T, options: Omit<TweenOptions<T>, 'from' | 'to' | 'onUpdate'> = {}): Tween<T> { this.stop(); const tween = new Tween({ ...options, from: this.current, to, onUpdate: (value, _progress, active) => this.setWithVelocity(value, active.instantaneousVelocity(), active.elapsed) }).play(); this.animation = tween; return tween; }
+  spring(to: T, options: PhysicsSpringOptions<T> = {}) { this.stop(); const item = new SpringItem<T>({ ...options, from: this.current, to, velocity: options.velocity ?? this.velocity, onUpdate: (value, velocity, time) => this.setWithVelocity(value, velocity, time), autoplay: true }); this.animation = item; return item; }
+  decay(options: InertiaOptions<T> = {}) { this.stop(); const item = new InertiaItem<T>({ ...options, from: this.current, velocity: options.velocity ?? this.velocity, onUpdate: (value, velocity, time) => this.setWithVelocity(value, velocity, time), autoplay: true }); this.animation = item; return item; }
   stop() { this.animation?.cancel(); this.animation = undefined; }
 }
 

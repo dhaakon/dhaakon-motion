@@ -38,6 +38,7 @@ export class GestureArena {
   }
   private claim(recognizer: Recognizer) {
     this.winner = recognizer; this.cancel(recognizer); if (recognizer.preventsScroll) this.session.preventScroll(true);
+    this.element.dispatchEvent(new CustomEvent('dhaakon-motion:arena', { bubbles: true, detail: { state: 'claimed', kind: recognizer.kind, priority: recognizer.priority } }));
     if (!recognizer.propagate) { let parent = this.element.parentElement; while (parent) { arenas.get(parent)?.cancel(); parent = parent.parentElement; } }
   }
 }

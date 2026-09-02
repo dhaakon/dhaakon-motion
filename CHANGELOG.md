@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0
+
+### Added
+
+- A dependency-free `@dhaakon/motion/gesture` entry with Pointer Events, capture, coalesced/predicted samples, weighted velocity estimation, and nested gesture-arena arbitration.
+- Tap, long-press, press, pan, swipe, pinch, rotate, wheel, and hover recognizers, plus scroll cooperation and explicit arena settlement.
+- Closed-form `SpringItem` and `InertiaItem` physics, rubberband bounds, projected fling targets, snapping, and spring/inertia cue-sheet item types.
+- `MotionValue.velocity`, timestamps, `setWithVelocity()`, `.spring()`, and `.decay()` for continuous animation/gesture/physics handoffs.
+- Vanilla `drag()`, `transformGesture()`, `scrub()`, press, and hover bindings with frame-coalesced writes, keyboard controls, ARIA, reduced-motion behavior, and threshold cues.
+- React drag and interaction props plus `useGesture`, `useDrag`, `usePinch`, `useScrub`, `useDragControls`, `useVelocity`, `useIsPressed`, and `useIsHovered`.
+- Serializable gesture recording/replay and `gestureToTrack()`, with deterministic pointer, stroke, fling, replay, and latency test utilities.
+- A gesture inspector overlay, a reproducible headless-Chrome benchmark, nine interaction demos, and seven integrated production labs.
+
+### Changed
+
+- Tween duration, delay, and repeat-delay continue to use `TimeInput`; spring timing now uses the same inherited frame-rate vocabulary when nested on a transport.
+
 ## 0.5.2
 
 ### Fixed

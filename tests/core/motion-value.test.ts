@@ -25,3 +25,16 @@ test('setWithVelocity preserves analytic velocity and a tween hands velocity to 
   expect(value.get()).toBe(150);
   expect(value.velocity).toBeCloseTo(1, 6);
 });
+
+test('starting a new physics animation cancels the previous one', () => {
+  const { driver, scheduler } = createTestScheduler();
+  const value = new MotionValue<number>(0);
+  const spring = value.spring(100, { scheduler });
+  driver.step(40);
+  const grabbed = value.get();
+  const inertia = value.decay({ scheduler, velocity: 1 });
+  expect(spring.isAnimating).toBe(false);
+  expect(value.get()).toBe(grabbed);
+  value.stop();
+  expect(inertia.isAnimating).toBe(false);
+});

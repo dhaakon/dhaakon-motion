@@ -1,5 +1,5 @@
-import { d as Transport, a as TransportOutput, F as FrameRateInput, f as TimeInput, e as Timeline, g as FrameInfo, K as Keyframe, b as TrackOptions, c as Track, h as CueEvent, i as TweenOptions, M as MotionValueShape, E as EasingInput, j as MotionValue, k as EasingFunction, T as TimelineItem, l as Tween, L as Line, m as animate, s as stagger, n as cubicBezier, o as spring } from './track-CKxBNm8F.js';
-export { C as Clock, p as CueOptions, q as CycleSample, r as CycleSpec, D as Direction, t as Easing, u as EasingName, v as EasingTuple, w as FrameDriver, x as FrameRate, y as FrameRates, z as FrameScheduler, A as FrameTask, I as InspectNode, B as Marker, G as MotionPrimitive, P as PropertyRange, R as RenderContext, S as SpringOptions, H as Timecode, J as TimelineOptions, N as TimelinePosition, O as Trace, Q as TraceEntry, U as TransportOptions, V as TransportState, W as TweenState, X as activeDuration, Y as addFrames, Z as createTrace, _ as defaultRenderContext, $ as formatTime, a0 as formatTimecode, a1 as frameRate, a2 as frameToMs, a3 as framesToTimecode, a4 as interpolate, a5 as mix, a6 as msToFrame, a7 as msToTimecode, a8 as parseTime, a9 as parseTimecode, aa as registerEasing, ab as resolveEasing, ac as sampleCycle, ad as scheduler, ae as serializeEasing, af as snapToFrame, ag as steps, ah as timecodeToFrames, ai as timecodeToMs, aj as totalDuration, ak as track } from './track-CKxBNm8F.js';
+import { d as Transport, a as TransportOutput, F as FrameRateInput, f as TimeInput, e as Timeline, g as FrameInfo, K as Keyframe, b as TrackOptions, c as Track, h as CueEvent, i as TweenOptions, j as MotionValueShape, E as EasingInput, M as MotionValue, k as EasingFunction, T as TimelineItem, l as Tween, L as Line, m as animate, s as stagger, n as cubicBezier, o as spring } from './track-D8CkFR8E.js';
+export { C as Clock, p as CueOptions, q as CycleSample, r as CycleSpec, D as Direction, t as Easing, u as EasingName, v as EasingTuple, w as FrameDriver, x as FrameRate, y as FrameRates, z as FrameScheduler, A as FrameTask, B as InertiaItem, G as InertiaItemOptions, I as InertiaOptions, H as InspectNode, J as Marker, N as MotionPrimitive, P as PhysicsSpringOptions, O as PropertyRange, R as RenderContext, S as SpringItem, Q as SpringItemOptions, U as SpringOptions, V as Timecode, W as TimelineOptions, X as TimelinePosition, Y as Trace, Z as TraceEntry, _ as TransportOptions, $ as TransportState, a0 as TweenState, a1 as VelocityShape, a2 as activeDuration, a3 as addFrames, a4 as clampWithRubberband, a5 as createTrace, a6 as defaultRenderContext, a7 as formatTime, a8 as formatTimecode, a9 as frameRate, aa as frameToMs, ab as framesToTimecode, ac as interpolate, ad as mix, ae as msToFrame, af as msToTimecode, ag as parseTime, ah as parseTimecode, ai as projectFling, aj as registerEasing, ak as resolveEasing, al as rubberband, am as sampleCycle, an as scheduler, ao as serializeEasing, ap as snapTo, aq as snapToFrame, ar as springDuration, as as steps, at as stiffnessFor, au as timecodeToFrames, av as timecodeToMs, aw as totalDuration, ax as track } from './track-D8CkFR8E.js';
 
 /**
  * A `Transport` meant for offline export rather than real-time playback: it
@@ -124,13 +124,42 @@ interface TimelineSheetItem {
     regions?: SheetRegion[];
     items: SheetItem[];
 }
+interface SpringSheetItem {
+    type: 'spring';
+    name?: string;
+    at?: TimeInput;
+    target?: string;
+    from: MotionValueShape;
+    to: MotionValueShape;
+    velocity?: number | MotionValueShape;
+    stiffness?: number;
+    damping?: number;
+    mass?: number;
+    restDelta?: number;
+    restSpeed?: number;
+    bounce?: number;
+    duration?: TimeInput;
+}
+interface InertiaSheetItem {
+    type: 'inertia';
+    name?: string;
+    at?: TimeInput;
+    target?: string;
+    from: number;
+    velocity: number;
+    power?: number;
+    timeConstant?: number;
+    min?: number;
+    max?: number;
+    restDelta?: number;
+}
 interface ExtensionSheetItem {
     type: string;
     name?: string;
     at?: TimeInput;
     [key: string]: unknown;
 }
-type SheetItem = TweenSheetItem | TrackSheetItem | TimelineSheetItem | ExtensionSheetItem;
+type SheetItem = TweenSheetItem | TrackSheetItem | TimelineSheetItem | SpringSheetItem | InertiaSheetItem | ExtensionSheetItem;
 interface CueSheet {
     $schema: 'dhaakon-motion/cue-sheet/1';
     name?: string;
@@ -234,4 +263,4 @@ declare const _default: {
     spring: typeof spring;
 };
 
-export { type ApplySceneOptions, CueEvent, type CueSheet, EasingFunction, EasingInput, type ExtensionSheetItem, FrameInfo, FrameRateInput, Keyframe, Line, type MotionStyle, MotionValue, MotionValueShape, OfflineTransport, type RenderFramesOptions, type SceneFile, type SceneSheetOptions, type SceneState, type SceneTransitionOptions, type SheetBindings, type SheetCue, type SheetDirection, type SheetItem, type SheetMarker, type SheetRegion, TimeInput, Timeline, TimelineItem, type TimelineSheetItem, Track, TrackOptions, type TrackSheetItem, Transport, TransportOutput, Tween, TweenOptions, type TweenSheetItem, type ValidationError, type ValidationResult, animate, applyScene, captureScene, cubicBezier, _default as default, drawOutput, frames, loadSheet, readStyle, renderFrames, saveSheet, sceneSheet, sceneTransition, signalOutput, spring, stagger, styleTrack, validateSheet, writeStyle };
+export { type ApplySceneOptions, CueEvent, type CueSheet, EasingFunction, EasingInput, type ExtensionSheetItem, FrameInfo, FrameRateInput, type InertiaSheetItem, Keyframe, Line, type MotionStyle, MotionValue, MotionValueShape, OfflineTransport, type RenderFramesOptions, type SceneFile, type SceneSheetOptions, type SceneState, type SceneTransitionOptions, type SheetBindings, type SheetCue, type SheetDirection, type SheetItem, type SheetMarker, type SheetRegion, type SpringSheetItem, TimeInput, Timeline, TimelineItem, type TimelineSheetItem, Track, TrackOptions, type TrackSheetItem, Transport, TransportOutput, Tween, TweenOptions, type TweenSheetItem, type ValidationError, type ValidationResult, animate, applyScene, captureScene, cubicBezier, _default as default, drawOutput, frames, loadSheet, readStyle, renderFrames, saveSheet, sceneSheet, sceneTransition, signalOutput, spring, stagger, styleTrack, validateSheet, writeStyle };

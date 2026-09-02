@@ -43,21 +43,30 @@ __export(react_exports, {
   createMotionComponent: () => createMotionComponent,
   motion: () => motion,
   useCue: () => useCue,
+  useDrag: () => useDrag,
+  useDragControls: () => useDragControls,
+  useGesture: () => useGesture,
   useInView: () => useInView,
+  useIsHovered: () => useIsHovered,
+  useIsPressed: () => useIsPressed,
   useMotionValue: () => useMotionValue,
   useMotionValueState: () => useMotionValueState,
+  usePinch: () => usePinch,
   usePlayhead: () => usePlayhead,
   usePlayheadValue: () => usePlayheadValue,
   useReducedMotion: () => useReducedMotion,
   useSceneState: () => useSceneState,
+  useScrub: () => useScrub,
   useTimeline: () => useTimeline,
   useTransport: () => useTransport,
   useTransportState: () => useTransportState,
-  useTween: () => useTween
+  useTween: () => useTween,
+  useVelocity: () => useVelocity
 });
 module.exports = __toCommonJS(react_exports);
 var import_react = __toESM(require("react"), 1);
 var import_motion = require("@dhaakon/motion");
+var import_gesture = require("@dhaakon/motion/gesture");
 var import_jsx_runtime = require("react/jsx-runtime");
 var MotionContext = (0, import_react.createContext)({ reducedMotion: "user" });
 function MotionConfig({ children, ...value }) {
@@ -142,18 +151,55 @@ function Motion({ from, to, children, ...options }) {
 }
 function createMotionComponent(tag) {
   const Component = (0, import_react.forwardRef)(function DhaakonMotionElement(rawProps, forwardedRef) {
-    const { as, initial, animate: target, whileInView, viewport, transition, style, onMotionStart, onMotionComplete, ...props } = rawProps;
+    const {
+      as,
+      initial,
+      animate: target,
+      whileInView,
+      viewport,
+      transition,
+      style,
+      whileHover,
+      whileTap,
+      whileDrag,
+      whileFocus,
+      drag,
+      dragAxis,
+      dragBounds,
+      dragElastic,
+      dragMomentum,
+      dragSnap,
+      dragPropagation,
+      dragControls,
+      onTap,
+      onLongPress,
+      onPanStart,
+      onPan,
+      onPanEnd,
+      onPinch,
+      onDragStart,
+      onDrag,
+      onDragEnd,
+      onMotionStart,
+      onMotionComplete,
+      ...props
+    } = rawProps;
     const localRef = (0, import_react.useRef)(null);
     const config = (0, import_react.useContext)(MotionContext);
     const reduced = useReducedMotion();
     const [inViewRef, inView] = useInView({ ...viewport, disabled: !whileInView });
     const hasAnimated = (0, import_react.useRef)(false);
+    const visual = (0, import_react.useRef)({});
+    const interactionTween = (0, import_react.useRef)(null);
     (0, import_react.useImperativeHandle)(forwardedRef, () => localRef.current);
     const initialKey = stableKey(initial);
     const targetKey = stableKey(target);
     const viewKey = stableKey(whileInView);
     (0, import_react.useLayoutEffect)(() => {
-      if (localRef.current && initial) (0, import_motion.writeStyle)(localRef.current, initial);
+      if (localRef.current && initial) {
+        visual.current = { ...initial };
+        (0, import_motion.writeStyle)(localRef.current, initial);
+      }
     }, [initialKey]);
     (0, import_react.useEffect)(() => {
       const node = localRef.current;
@@ -162,6 +208,7 @@ function createMotionComponent(tag) {
       const from = hasAnimated.current || initial === false ? (0, import_motion.readStyle)(node, activeTarget) : { ...initial || (0, import_motion.readStyle)(node, activeTarget) };
       hasAnimated.current = true;
       if (reduced) {
+        visual.current = { ...visual.current, ...activeTarget };
         (0, import_motion.writeStyle)(node, activeTarget);
         onMotionComplete?.();
         return;
@@ -173,13 +220,127 @@ function createMotionComponent(tag) {
         from,
         to: activeTarget,
         onStart: () => onMotionStart?.(),
-        onUpdate: (value) => (0, import_motion.writeStyle)(node, value),
+        onUpdate: (value) => {
+          visual.current = { ...visual.current, ...value };
+          (0, import_motion.writeStyle)(node, visual.current);
+        },
         onComplete: () => onMotionComplete?.()
       }).play();
       return () => {
         tween.cancel();
       };
     }, [initialKey, targetKey, viewKey, inView, reduced, config.frameRate, config.transition?.frameRate, transition?.frameRate, transition?.duration, transition?.delay, transition?.repeat, transition?.repeatDelay, transition?.yoyo, transition?.easing]);
+    const hoverKey = stableKey(whileHover);
+    const tapKey = stableKey(whileTap);
+    const dragKey = stableKey(whileDrag);
+    const focusKey = stableKey(whileFocus);
+    const boundsKey = stableKey(dragBounds);
+    const snapKey = stableKey(dragSnap);
+    (0, import_react.useEffect)(() => {
+      const node = localRef.current;
+      if (!node) return;
+      const base = () => whileInView && inView ? whileInView : target ?? (initial || {});
+      const animateInteraction = (state) => {
+        const next = { ...base(), ...state ?? {} };
+        interactionTween.current?.cancel();
+        if (reduced) {
+          visual.current = { ...visual.current, ...next };
+          (0, import_motion.writeStyle)(node, visual.current);
+          return;
+        }
+        interactionTween.current = new import_motion.Tween({ ...config.transition, ...transition, from: { ...visual.current }, to: next, onUpdate: (value) => {
+          visual.current = value;
+          (0, import_motion.writeStyle)(node, value);
+        } }).play();
+      };
+      const disposers = [];
+      if (whileHover) {
+        const binding = (0, import_gesture.hover)(node, { onChange: (active) => animateInteraction(active ? whileHover : void 0) });
+        disposers.push(binding.dispose);
+      }
+      if (whileTap) {
+        const binding = (0, import_gesture.press)(node, { onChange: (active) => animateInteraction(active ? whileTap : void 0) });
+        disposers.push(binding.dispose);
+      }
+      if (whileFocus) {
+        const focus = () => animateInteraction(whileFocus);
+        const blur = () => animateInteraction();
+        node.addEventListener("focus", focus);
+        node.addEventListener("blur", blur);
+        disposers.push(() => {
+          node.removeEventListener("focus", focus);
+          node.removeEventListener("blur", blur);
+        });
+      }
+      if (onTap || onLongPress || onPanStart || onPan || onPanEnd || onPinch) {
+        const recognizers = [];
+        if (onTap) {
+          const recognizer = (0, import_gesture.tapRecognizer)();
+          recognizer.subscribe(onTap);
+          recognizers.push(recognizer);
+        }
+        if (onLongPress) {
+          const recognizer = (0, import_gesture.longPressRecognizer)();
+          recognizer.subscribe(onLongPress);
+          recognizers.push(recognizer);
+        }
+        if (onPanStart || onPan || onPanEnd) {
+          const recognizer = (0, import_gesture.panRecognizer)({ axis: dragAxis });
+          recognizer.subscribe((event) => {
+            if (event.phase === "began") onPanStart?.(event);
+            else if (event.phase === "changed") onPan?.(event);
+            else if (event.phase === "ended") onPanEnd?.(event);
+          });
+          recognizers.push(recognizer);
+        }
+        if (onPinch) {
+          const recognizer = (0, import_gesture.pinchRecognizer)();
+          recognizer.subscribe(onPinch);
+          recognizers.push(recognizer);
+        }
+        const arena = new import_gesture.GestureArena(node, recognizers);
+        disposers.push(() => arena.dispose());
+      }
+      if (drag) {
+        const x = new import_motion.MotionValue(Number(visual.current.x ?? 0));
+        const y = new import_motion.MotionValue(Number(visual.current.y ?? 0));
+        const writeDrag = () => {
+          visual.current = { ...visual.current, x: x.get(), y: y.get() };
+          (0, import_motion.writeStyle)(node, visual.current);
+        };
+        const ux = x.subscribe(writeDrag);
+        const uy = y.subscribe(writeDrag);
+        const axis = dragAxis ?? (drag === true ? "any" : drag);
+        const binding = (0, import_gesture.drag)(axis === "x" ? x : axis === "y" ? y : { x, y }, node, {
+          axis,
+          bounds: dragBounds,
+          elastic: dragElastic,
+          momentum: dragMomentum,
+          snap: dragSnap,
+          propagate: dragPropagation,
+          onStart: (event) => {
+            animateInteraction(whileDrag);
+            onDragStart?.(event);
+          },
+          onMove: (event) => onDrag?.(event),
+          onEnd: (event) => {
+            animateInteraction();
+            onDragEnd?.(event);
+          }
+        });
+        dragControls?._bind(binding);
+        disposers.push(() => {
+          dragControls?._unbind(binding);
+          ux();
+          uy();
+          binding.dispose();
+        });
+      }
+      return () => {
+        interactionTween.current?.cancel();
+        disposers.forEach((dispose) => dispose());
+      };
+    }, [hoverKey, tapKey, dragKey, focusKey, boundsKey, snapKey, Boolean(drag), dragAxis, dragElastic, dragMomentum, dragPropagation, reduced]);
     return import_react.default.createElement(as || tag, { ...props, style, ref: (node) => {
       localRef.current = node;
       inViewRef.current = node;
@@ -199,6 +360,76 @@ var motion = new Proxy({}, { get: (_, tag) => {
   if (!cache.has(tag)) cache.set(tag, createMotionComponent(tag));
   return cache.get(tag);
 } });
+function useGesture(ref, recognizers) {
+  const key = recognizers.map((recognizer) => recognizer.kind).join("|");
+  (0, import_react.useEffect)(() => {
+    if (!ref.current) return;
+    const arena = new import_gesture.GestureArena(ref.current, recognizers);
+    return () => arena.dispose();
+  }, [ref, key]);
+}
+function useDrag(ref, target, options = {}) {
+  const controls = (0, import_react.useRef)(null);
+  const key = stableKey(options);
+  (0, import_react.useEffect)(() => {
+    if (!ref.current) return;
+    controls.current = (0, import_gesture.drag)(target, ref.current, options);
+    return () => {
+      controls.current?.dispose();
+      controls.current = null;
+    };
+  }, [ref, target, key]);
+  return controls;
+}
+function usePinch(ref, options) {
+  const key = stableKey(options);
+  (0, import_react.useEffect)(() => {
+    if (!ref.current) return;
+    const binding = (0, import_gesture.transformGesture)(ref.current, options);
+    return binding.dispose;
+  }, [ref, key]);
+}
+function useScrub(ref, transport, options = {}) {
+  const inherited = (0, import_react.useContext)(TransportContext);
+  const active = transport ?? inherited;
+  const key = stableKey(options);
+  (0, import_react.useEffect)(() => {
+    if (!ref.current || !active) return;
+    const binding = (0, import_gesture.scrub)(active, ref.current, options);
+    return binding.dispose;
+  }, [ref, active, key]);
+}
+function useDragControls() {
+  const active = (0, import_react.useRef)(null);
+  return (0, import_react.useMemo)(() => ({ start: (event) => active.current?.start(event), cancel: () => active.current?.cancel(), _bind: (control) => {
+    active.current = control;
+  }, _unbind: (control) => {
+    if (active.current === control) active.current = null;
+  } }), []);
+}
+function useVelocity(value) {
+  const output = useMotionValue(value.velocity);
+  (0, import_react.useEffect)(() => value.subscribe(() => output.set(value.velocity)), [value, output]);
+  return output;
+}
+function useIsPressed(ref) {
+  const state = useMotionValue(false);
+  (0, import_react.useEffect)(() => {
+    if (!ref.current) return;
+    const binding = (0, import_gesture.press)(ref.current, { onChange: (value) => state.set(value) });
+    return binding.dispose;
+  }, [ref, state]);
+  return useMotionValueState(state);
+}
+function useIsHovered(ref) {
+  const state = useMotionValue(false);
+  (0, import_react.useEffect)(() => {
+    if (!ref.current) return;
+    const binding = (0, import_gesture.hover)(ref.current, { onChange: (value) => state.set(value) });
+    return binding.dispose;
+  }, [ref, state]);
+  return useMotionValueState(state);
+}
 function Reveal({ from = { y: 28, opacity: 0 }, to = { y: 0, opacity: 1 }, once = true, amount = "some", margin = "0px 0px -8% 0px", ...props }) {
   return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(motion.div, { ...props, initial: from, whileInView: to, viewport: { once, amount, margin } });
 }
@@ -499,16 +730,24 @@ function useSceneState(targets) {
   createMotionComponent,
   motion,
   useCue,
+  useDrag,
+  useDragControls,
+  useGesture,
   useInView,
+  useIsHovered,
+  useIsPressed,
   useMotionValue,
   useMotionValueState,
+  usePinch,
   usePlayhead,
   usePlayheadValue,
   useReducedMotion,
   useSceneState,
+  useScrub,
   useTimeline,
   useTransport,
   useTransportState,
-  useTween
+  useTween,
+  useVelocity
 });
 //# sourceMappingURL=react.cjs.map

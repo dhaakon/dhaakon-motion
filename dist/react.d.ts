@@ -1,6 +1,7 @@
 import React from 'react';
 import { CueOptions, TimelinePosition, CueEvent, MotionValueShape, TweenOptions, Tween as Tween$1, TimeInput, EasingFunction, EasingName, FrameRateInput, MotionStyle, TrackOptions, MotionValue, Keyframe, TransportOptions, Clock, TransportOutput, Transport as Transport$1, TransportState, SceneState, ApplySceneOptions, Timeline } from '@dhaakon/motion';
 export { MotionStyle } from '@dhaakon/motion';
+import { DragOptions, DragControls, GestureEvent, Recognizer, TransformGestureOptions, ScrubOptions } from '@dhaakon/motion/gesture';
 
 interface MotionTransition {
     duration?: TimeInput;
@@ -49,6 +50,27 @@ type MotionElementProps<T extends React.ElementType> = NativeProps<T> & {
     style?: React.CSSProperties;
     whileInView?: MotionStyle;
     viewport?: InViewOptions;
+    whileHover?: MotionStyle;
+    whileTap?: MotionStyle;
+    whileDrag?: MotionStyle;
+    whileFocus?: MotionStyle;
+    drag?: boolean | 'x' | 'y';
+    dragAxis?: DragOptions['axis'];
+    dragBounds?: DragOptions['bounds'];
+    dragElastic?: number | false;
+    dragMomentum?: DragOptions['momentum'];
+    dragSnap?: DragOptions['snap'];
+    dragPropagation?: boolean;
+    dragControls?: ReturnType<typeof useDragControls>;
+    onTap?: (event: GestureEvent<'tap'>) => void;
+    onLongPress?: (event: GestureEvent<'longPress'>) => void;
+    onPanStart?: (event: GestureEvent<'pan'>) => void;
+    onPan?: (event: GestureEvent<'pan'>) => void;
+    onPanEnd?: (event: GestureEvent<'pan'>) => void;
+    onPinch?: (event: GestureEvent<'pinch'>) => void;
+    onDragStart?: (event: GestureEvent<'pan'>) => void;
+    onDrag?: (event: GestureEvent<'pan'>) => void;
+    onDragEnd?: (event: GestureEvent<'pan'>) => void;
     onMotionStart?: () => void;
     onMotionComplete?: () => void;
     as?: React.ElementType;
@@ -63,6 +85,23 @@ type MotionFactory = {
     [key: string]: React.ComponentType<any>;
 };
 declare const motion: MotionFactory;
+declare function useGesture<T extends Element>(ref: React.RefObject<T | null>, recognizers: Recognizer[]): void;
+declare function useDrag<T extends Element>(ref: React.RefObject<T | null>, target: MotionValue<number> | {
+    x: MotionValue<number>;
+    y: MotionValue<number>;
+}, options?: DragOptions): React.RefObject<DragControls | null>;
+declare function usePinch<T extends Element>(ref: React.RefObject<T | null>, options: TransformGestureOptions): void;
+declare function useScrub<T extends Element>(ref: React.RefObject<T | null>, transport?: Transport$1, options?: ScrubOptions): void;
+interface ReactDragControls {
+    start(event: PointerEvent): void;
+    cancel(): void;
+    _bind(control: DragControls): void;
+    _unbind(control: DragControls): void;
+}
+declare function useDragControls(): ReactDragControls;
+declare function useVelocity<T extends MotionValueShape>(value: MotionValue<T>): MotionValue<number | T>;
+declare function useIsPressed<T extends Element>(ref: React.RefObject<T | null>): boolean;
+declare function useIsHovered<T extends Element>(ref: React.RefObject<T | null>): boolean;
 interface RevealProps extends Omit<MotionElementProps<'div'>, 'initial' | 'animate' | 'whileInView' | 'viewport'> {
     from?: MotionStyle;
     to?: MotionStyle;
@@ -171,4 +210,4 @@ type SceneTargets = Record<string, MotionValue<any> | ((value: any) => void)>;
 /** A React-visible copy of a set of `MotionValue`/setter targets, plus a setter that writes them back (optionally as a `transition`). */
 declare function useSceneState(targets: SceneTargets): [SceneState, (next: SceneState, transition?: ApplySceneOptions['transition']) => void];
 
-export { Cue, type CueElementProps, type InViewOptions, Marker, type MarkerElementProps, Motion, MotionConfig, type MotionConfigValue, type MotionElementProps, type MotionRenderProps, type MotionTransition, Region, type RegionElementProps, Reveal, type RevealProps, Sequence, type SequenceProps, Track, type TrackProps, Transport, type TransportProps, Tween, type TweenElementProps, createMotionComponent, motion, useCue, useInView, useMotionValue, useMotionValueState, usePlayhead, usePlayheadValue, useReducedMotion, useSceneState, useTimeline, useTransport, useTransportState, useTween };
+export { Cue, type CueElementProps, type InViewOptions, Marker, type MarkerElementProps, Motion, MotionConfig, type MotionConfigValue, type MotionElementProps, type MotionRenderProps, type MotionTransition, type ReactDragControls, Region, type RegionElementProps, Reveal, type RevealProps, Sequence, type SequenceProps, Track, type TrackProps, Transport, type TransportProps, Tween, type TweenElementProps, createMotionComponent, motion, useCue, useDrag, useDragControls, useGesture, useInView, useIsHovered, useIsPressed, useMotionValue, useMotionValueState, usePinch, usePlayhead, usePlayheadValue, useReducedMotion, useSceneState, useScrub, useTimeline, useTransport, useTransportState, useTween, useVelocity };
