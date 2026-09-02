@@ -1,5 +1,5 @@
 export type PointerType = 'mouse' | 'touch' | 'pen';
-export interface PointerSample { id: number; type: PointerType; x: number; y: number; t: number; pressure: number; buttons: number; isPrimary: boolean; predicted?: boolean }
+export interface PointerSample { id: number; type: PointerType; x: number; y: number; t: number; pressure: number; buttons: number; isPrimary: boolean; predicted?: boolean; native?: PointerEvent }
 export interface SessionOptions {
   element: Element;
   capture?: boolean;
@@ -16,7 +16,7 @@ export interface PointerSession { dispose(): void; pointers: ReadonlyMap<number,
 
 function normalize(event: PointerEvent, predicted = false): PointerSample {
   const type = event.pointerType === 'touch' || event.pointerType === 'pen' ? event.pointerType : 'mouse';
-  return { id: event.pointerId, type, x: event.clientX, y: event.clientY, t: event.timeStamp, pressure: event.pressure ?? 0, buttons: event.buttons, isPrimary: event.isPrimary, predicted };
+  return { id: event.pointerId, type, x: event.clientX, y: event.clientY, t: event.timeStamp, pressure: event.pressure ?? 0, buttons: event.buttons, isPrimary: event.isPrimary, predicted, native: event };
 }
 
 export function createPointerSession(options: SessionOptions): PointerSession {
@@ -99,4 +99,3 @@ export function createPointerSession(options: SessionOptions): PointerSession {
     },
   };
 }
-
