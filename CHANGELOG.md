@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.0
+
+- Add browser-owned CSS animation through `/css` and React `cssMotion`, with
+  named variants and shared Dhaakon UI timing tokens.
+- Preserve current visual values during interruption, respect reduced motion,
+  clean up native effects, and report immediate-CSS fallback explicitly.
+- Add the featured `/css-ui` docs lab with keyboard/focus handling, exit semantics,
+  input retention, backend telemetry and desktop/mobile verification.
+- Keep existing JavaScript timelines and opt-in experimental Rust/Wasm evaluation
+  separate. No automatic backend promotion or universal GPU-acceleration claim.
+- Git/docs release only; npm publication and registry tags are separate operations.
+
 ## 0.6.0
 
 ### Added

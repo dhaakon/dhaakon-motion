@@ -1,6 +1,6 @@
 {
   "name": "@dhaakon/motion",
-  "version": "0.7.0-experimental.0",
+  "version": "0.8.0",
   "description": "Optimized tween, timeline, transport, and React composition primitives for the Dhaakon network.",
   "type": "module",
   "license": "MIT",

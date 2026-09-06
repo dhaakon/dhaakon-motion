@@ -1,8 +1,8 @@
 # CSS-native UI motion
 
-Status: first vertical slice on `feat/css-native-ui-motion`. This is source-branch
-documentation, not a claim that a registry release or docs deployment has occurred.
-The feature page is `/css-ui` after building this branch's docs.
+Status: v0.8.0 Git/docs release, developed on `feat/css-native-ui-motion`.
+The feature page is `/css-ui`. Registry publication is separate from docs deployment.
+Rust/Wasm remains opt-in and experimental; this release does not promote its backend.
 
 ## Execution boundary
 
