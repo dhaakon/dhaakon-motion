@@ -19,6 +19,7 @@ const types = {
   '.mp4': 'video/mp4',
   '.woff2': 'font/woff2',
   '.svg': 'image/svg+xml',
+  '.wasm': 'application/wasm',
 };
 const server = createServer(async (request, response) => {
   try {

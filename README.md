@@ -16,6 +16,11 @@ Configure the network registry once:
 npm install @dhaakon/motion
 ```
 
+The opt-in Rust/Wasm prerelease uses `npm install @dhaakon/motion@experimental`.
+Explore its [advanced experimental demos](http://dhaakon-ubuntu:21764/rust/experimental)
+and [scope, lifecycle and verification notes](docs/RUST-EXPERIMENTAL.md).
+It does not change the stable `latest` tag or automatically accelerate existing imports.
+
 ## Core
 
 ```ts

@@ -4,6 +4,7 @@ COPY package.json package-lock.json .npmrc tsconfig.json tsup.config.ts ./
 RUN npm ci --ignore-scripts
 COPY src ./src
 COPY docs ./docs
+COPY wasm ./wasm
 RUN npm run docs:build
 
 FROM nginx:1.27-alpine AS serve

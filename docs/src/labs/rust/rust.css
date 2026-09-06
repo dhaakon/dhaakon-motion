@@ -1,0 +1,419 @@
+.rust-experimental {
+  --rust-ink: #0e1418;
+  --rust-muted: #9dacaf;
+  --rust-lime: #c5f56b;
+  --rust-cyan: #7edbe6;
+  --rust-line: #334047;
+  --rust-paper: #eef0e8;
+}
+.rust-intro {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 32px;
+  align-items: end;
+  margin-bottom: 30px;
+}
+.rust-intro h2,
+.rust-section-heading h2,
+.rust-proof h2 {
+  font: 400 clamp(30px, 3.2vw, 52px)/1.05 var(--dhk-font-sans);
+  letter-spacing: -0.055em;
+  margin: 15px 0;
+}
+.rust-intro h2 em {
+  font-style: normal;
+  color: #647740;
+}
+.rust-intro > p,
+.rust-section-heading > p,
+.rust-proof p {
+  font: 14px/1.7 var(--dhk-font-sans);
+  max-width: 620px;
+}
+.rust-experimental button,
+.rust-experimental select {
+  cursor: pointer;
+  font: 500 11px/1.4 var(--dhk-font-mono);
+  border-radius: 0;
+}
+.rust-experimental button:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+.rust-experimental button:focus-visible,
+.rust-experimental input:focus-visible,
+.rust-experimental select:focus-visible {
+  outline: 3px solid #dc671f;
+  outline-offset: 4px;
+}
+.rust-experimental .rust-primary {
+  padding: 12px 18px;
+  background: var(--rust-lime);
+  border: 1px solid var(--rust-lime);
+  color: var(--rust-ink);
+  font-weight: 700;
+}
+.rust-runtime {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--rust-ink);
+  color: var(--rust-paper);
+  padding: 23px 25px;
+  border-bottom: 1px solid var(--rust-line);
+}
+.rust-runtime strong {
+  font: 500 13px var(--dhk-font-sans);
+}
+.rust-runtime p {
+  font: 10px/1.7 var(--dhk-font-mono);
+  margin: 8px 0 0 20px;
+  color: var(--rust-muted);
+}
+.rust-status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 13px;
+  background: #e69a67;
+}
+.rust-status-dot.is-ready {
+  background: var(--rust-lime);
+}
+.rust-experimental .demo-viewport {
+  background: var(--rust-ink);
+  color: var(--rust-paper);
+  border: 1px solid var(--rust-line);
+  margin: 0 0 32px;
+}
+.rust-experimental .demo-runtime {
+  color: var(--rust-muted);
+  background: transparent;
+  border-color: var(--rust-line);
+}
+.rust-experimental .demo-runtime button {
+  color: var(--rust-paper);
+  background: transparent;
+  border: 1px solid var(--rust-line);
+  padding: 7px 11px;
+}
+.rust-stage-label {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  font: 9px var(--dhk-font-mono);
+  letter-spacing: 0.1em;
+  padding: 18px 22px;
+  color: var(--rust-muted);
+}
+.rust-stage-label span:last-child {
+  color: var(--rust-lime);
+}
+.rust-score > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.rust-score-readout {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 17px 22px;
+  border-top: 1px solid var(--rust-line);
+  border-bottom: 1px solid var(--rust-line);
+  font: 10px/1.7 var(--dhk-font-mono);
+  color: var(--rust-muted);
+}
+.rust-score-readout b {
+  color: var(--rust-paper);
+}
+.rust-score-readout code {
+  white-space: nowrap;
+  color: var(--rust-lime);
+}
+.rust-controls,
+.rust-batch-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 20px 22px 12px;
+}
+.rust-controls button,
+.rust-batch-controls button,
+.rust-controls select,
+.rust-batch-controls select {
+  background: #172127;
+  color: var(--rust-paper);
+  border: 1px solid #465259;
+  padding: 10px 12px;
+  min-height: 40px;
+}
+.rust-controls label,
+.rust-batch-controls label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font: 10px var(--dhk-font-mono);
+  color: var(--rust-muted);
+}
+.rust-controls [aria-pressed='true'] {
+  color: var(--rust-lime);
+  border-color: var(--rust-lime);
+}
+.rust-timing {
+  font: 9px var(--dhk-font-mono);
+  color: var(--rust-muted);
+}
+.rust-scrub {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 18px;
+  align-items: center;
+  font: 10px var(--dhk-font-mono);
+  padding: 14px 22px 24px;
+}
+.rust-experimental input[type='range'] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--rust-lime);
+  cursor: pointer;
+}
+.rust-acts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border-top: 1px solid var(--rust-line);
+  border-bottom: 1px solid var(--rust-line);
+}
+.rust-acts button {
+  text-align: left;
+  padding: 18px 14px;
+  border: 0;
+  border-right: 1px solid var(--rust-line);
+  background: transparent;
+  color: var(--rust-muted);
+}
+.rust-acts button:last-child {
+  border-right: 0;
+}
+.rust-acts button[aria-pressed='true'] {
+  box-shadow: inset 0 3px 0 var(--rust-lime);
+  color: var(--rust-lime);
+  background: #1b2724;
+}
+.rust-acts span,
+.rust-acts b {
+  display: block;
+}
+.rust-acts span {
+  font-size: 9px;
+  margin-bottom: 9px;
+}
+.rust-caption {
+  font: 11px/1.75 var(--dhk-font-sans);
+  opacity: 0.75;
+  margin: 18px 0;
+}
+.rust-score > .rust-caption,
+.rust-batch > p {
+  padding: 0 22px;
+}
+.rust-section-heading {
+  padding: 40px 0 24px;
+}
+.rust-section-heading > span,
+.rust-boundaries article > span {
+  font: 10px var(--dhk-font-mono);
+  letter-spacing: 0.12em;
+}
+.rust-batch-panes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--rust-line);
+  border-top: 1px solid var(--rust-line);
+  border-bottom: 1px solid var(--rust-line);
+}
+.rust-batch-pane {
+  min-width: 0;
+  background: var(--rust-ink);
+}
+.rust-batch-pane-heading {
+  padding: 16px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  font: 10px/1.5 var(--dhk-font-mono);
+}
+.rust-batch-pane-heading span {
+  color: var(--rust-muted);
+}
+.rust-batch-scrub {
+  display: block;
+  padding: 22px;
+  font: 10px/1.8 var(--dhk-font-mono);
+}
+.rust-batch-scrub output {
+  color: var(--rust-lime);
+  margin-left: 10px;
+}
+.rust-batch-scrub input {
+  display: block;
+  margin-top: 12px;
+}
+.rust-batch-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 22px 20px;
+}
+.rust-batch-acts button {
+  padding: 10px 12px;
+  background: #172127;
+  color: var(--rust-cyan);
+  border: 1px solid var(--rust-line);
+}
+.rust-batch-metrics span,
+.rust-batch-metrics strong,
+.rust-batch-metrics small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.rust-batch-metrics span,
+.rust-batch-metrics small {
+  color: var(--rust-muted);
+  font-weight: 400;
+}
+.rust-batch-metrics strong {
+  color: var(--rust-lime);
+  margin: 4px 0;
+  font-weight: 500;
+}
+.rust-batch > .rust-batch-parity {
+  font: 10px/1.8 var(--dhk-font-mono);
+  color: var(--rust-lime);
+}
+.rust-batch > .rust-note {
+  font: 11px/1.8 var(--dhk-font-sans);
+  color: var(--rust-muted);
+}
+.rust-batch-canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.rust-batch-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+  font: 10px/1.7 var(--dhk-font-mono);
+  padding: 16px 20px;
+  border-top: 1px solid var(--rust-line);
+}
+.rust-batch-metrics dt {
+  color: var(--rust-muted);
+}
+.rust-batch-metrics dd {
+  margin: 0;
+  color: var(--rust-lime);
+}
+.rust-proof {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 50px;
+  padding: 56px 0;
+  border-top: 1px solid var(--dhk-border-strong);
+  border-bottom: 1px solid var(--dhk-border-strong);
+}
+.rust-proof-result {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 30px;
+  background: #e5ebdc;
+  border: 1px solid #bac5af;
+}
+.rust-proof-result > span {
+  font: 10px var(--dhk-font-mono);
+  letter-spacing: 0.1em;
+}
+.rust-proof-result > strong {
+  font: 400 clamp(30px, 4vw, 60px)/1.1 var(--dhk-font-sans);
+  letter-spacing: -0.05em;
+  margin: 28px 0 12px;
+}
+.rust-proof-result > p {
+  font: 11px/1.7 var(--dhk-font-mono);
+  overflow-wrap: anywhere;
+}
+.rust-boundaries {
+  padding: 45px 0;
+}
+.rust-boundaries h2 {
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+.rust-boundaries > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 25px;
+  margin-top: 30px;
+}
+.rust-boundaries h3 {
+  font-size: 16px;
+  font-weight: 500;
+}
+.rust-boundaries p {
+  font: 12px/1.8 var(--dhk-font-sans);
+}
+.rust-error {
+  padding: 15px;
+  border: 1px solid #b6603b;
+  font: 12px/1.7 var(--dhk-font-mono);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1000px) {
+  .rust-intro,
+  .rust-proof {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  .rust-runtime {
+    flex-wrap: wrap;
+  }
+  .rust-boundaries > div {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 600px) {
+  .rust-batch-panes {
+    grid-template-columns: 1fr;
+  }
+  .rust-acts {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .rust-acts button {
+    padding: 14px 5px;
+    font-size: 9px;
+    overflow-wrap: anywhere;
+  }
+  .rust-acts span {
+    font-size: 8px;
+  }
+  .rust-score-readout {
+    flex-wrap: wrap;
+  }
+  .rust-scrub {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .rust-stage-label,
+  .rust-controls,
+  .rust-batch-controls {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}

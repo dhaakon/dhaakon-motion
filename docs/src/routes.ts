@@ -13,6 +13,17 @@ export const routes = [
     component: lazy(() => import('./pages/OverviewPage')),
   },
   {
+    path: '/rust/experimental',
+    title: 'Motion, closer to the metal.',
+    label: 'Rust / Wasm lab',
+    group: 'Experimental',
+    description:
+      'A compiled vector score, synchronized particle fields, and exact-frame JS / Rust conformance. An opt-in engine laboratory.',
+    source: 'docs/src/labs/rust/ScoreLab.tsx',
+    test: 'docs/scripts/verify-rust.mjs',
+    component: lazy(() => import('./pages/RustExperimentalPage')),
+  },
+  {
     path: '/tweens',
     title: 'Values in motion.',
     label: 'Tweens & easing',

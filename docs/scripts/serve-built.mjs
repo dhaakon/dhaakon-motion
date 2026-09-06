@@ -18,6 +18,7 @@ export async function serveBuilt() {
     '.woff2': 'font/woff2',
     '.svg': 'image/svg+xml',
     '.png': 'image/png',
+    '.wasm': 'application/wasm',
   };
   const server = createServer(async (request, response) => {
     try {

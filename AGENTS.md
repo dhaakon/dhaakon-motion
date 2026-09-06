@@ -89,6 +89,10 @@ then run decoded-frame image comparisons; JSON hashes alone do not prove parity.
 - Keep binary/IR/ABI versions, TS/Rust validators, source mappings and conformance tests aligned.
 - Run `npm run test:wasm` and `npm run test:packed-engine` after backend/packaging changes.
 - GPU/scene/export work is a separate milestone; state hashes are not pixel or audio parity.
+- The opt-in docs route is `/rust/experimental`; read `docs/RUST-EXPERIMENTAL.md`.
+  Its actual browser/failure/lifecycle verifier is `docs/scripts/verify-rust.mjs`.
+  Keep generated Wasm out of eager imports, copy it in `Dockerfile.docs`, and
+  preserve explicit asset MIME/404 handling. Experimental publishes must not move `latest`.
 
 ## Add a feature page
 

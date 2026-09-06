@@ -1,6 +1,10 @@
 # Engine migration — implementation status
 
-2026-09-06 · branch `feat/rust-wasm-engine` · package version remains 0.6.0
+Initial engine batch: 2026-09-06 · branch `feat/rust-wasm-engine` · baseline package 0.6.0
+
+The follow-up [experimental docs and prerelease](RUST-EXPERIMENTAL.md) target
+`0.7.0-experimental.0` with a dedicated `/rust/experimental` route and opt-in
+registry tag. The implementation and promotion limits below remain in force.
 
 Baseline checkpoint: `76b1221`. The preexisting docs, media, engine fixes and audit were committed separately on `main` with the owner's authorization before creating the feature branch. No push, publication, version bump, HTTPS configuration or container deployment is implied.
 

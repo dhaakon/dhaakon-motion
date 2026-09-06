@@ -24,6 +24,10 @@ let raw = 0,
 for (const key of initial) {
   assert(!key.includes('Page.tsx'), `Feature eagerly imported: ${key}`);
   assert(!/three.*module/i.test(key), `Three.js eagerly imported: ${key}`);
+  assert(
+    !/motion_wasm|compiled|RustExperimental/i.test(key),
+    `Experimental runtime eagerly imported: ${key}`,
+  );
   const content = await readFile(new URL(manifest[key].file, dist));
   raw += content.byteLength;
   gzip += gzipSync(content).byteLength;
