@@ -6,6 +6,7 @@
     "baseUrl": ".",
     "paths": {
       "@dhaakon/motion": ["src/index.ts"],
+      "@dhaakon/motion/css": ["src/css.ts"],
       "@dhaakon/motion/compiled": ["src/compiled.ts"],
       "@dhaakon/motion/wasm/*": ["wasm/*"],
       "@dhaakon/motion/react": ["src/react.tsx"],

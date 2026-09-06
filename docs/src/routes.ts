@@ -24,6 +24,17 @@ export const routes = [
     component: lazy(() => import('./pages/RustExperimentalPage')),
   },
   {
+    path: '/css-ui',
+    title: 'CSS belongs at the surface.',
+    label: 'CSS + Dhaakon UI',
+    group: 'Fundamentals',
+    description:
+      'Native CSS motion, shared design tokens and an accessible disclosure. Let the browser own the frame loop.',
+    source: 'src/react-css.tsx',
+    test: 'tests/react/css-motion.test.tsx',
+    component: lazy(() => import('./pages/CssUiPage')),
+  },
+  {
     path: '/tweens',
     title: 'Values in motion.',
     label: 'Tweens & easing',

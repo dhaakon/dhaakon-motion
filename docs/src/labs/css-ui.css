@@ -1,0 +1,167 @@
+.css-ui-lab {
+  border: 1px solid var(--dhk-border-strong);
+  margin-bottom: 36px;
+}
+.css-ui-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--dhk-border-strong);
+  background: var(--dhk-paper-bright, #faf9f5);
+}
+.css-ui-controls label {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  font: 11px var(--dhk-font-mono);
+}
+.css-ui-controls input {
+  accent-color: var(--dhk-ink);
+}
+.css-ui-study {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+}
+.css-ui-workbench {
+  padding: clamp(18px, 3vw, 40px);
+  background-image: radial-gradient(#bbb9b1 0.7px, transparent 0.7px);
+  background-size: 16px 16px;
+}
+.css-ui-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 24px;
+  font: 9px var(--dhk-font-mono);
+  letter-spacing: 0.05em;
+}
+.css-ui-card {
+  background: var(--dhk-paper-bright, #faf9f5);
+}
+.css-ui-card h2 {
+  font: 400 38px/1.1 var(--dhk-font-sans);
+  letter-spacing: -0.045em;
+  margin: 20px 0;
+}
+.css-ui-card p {
+  font: 13px/1.7 var(--dhk-font-sans);
+}
+.css-ui-card .css-ui-overline,
+.css-ui-overline {
+  font: 9px/1.7 var(--dhk-font-mono);
+  letter-spacing: 0.12em;
+}
+.css-ui-card button {
+  margin-top: 10px;
+}
+.css-ui-panel {
+  padding: 20px;
+  margin-top: 20px;
+  background: #e6e9df;
+  border: 1px solid #b6bdab;
+}
+.css-ui-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font: 9px var(--dhk-font-mono);
+  margin-bottom: 18px;
+}
+.css-ui-panel label {
+  display: block;
+  font: 12px var(--dhk-font-sans);
+  margin-bottom: 8px;
+}
+.css-ui-panel input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #808872;
+  background: var(--dhk-paper-bright, #faf9f5);
+  color: var(--dhk-ink);
+  font: 12px var(--dhk-font-mono);
+}
+.css-ui-hint {
+  font: 11px/1.7 var(--dhk-font-sans);
+  margin-top: 22px;
+  max-width: 440px;
+}
+.css-ui-inspector {
+  min-width: 0;
+  padding: clamp(20px, 3vw, 38px);
+  background: var(--dhk-ink);
+  color: var(--dhk-paper);
+}
+.css-ui-inspector h3 {
+  font: 400 28px/1.2 var(--dhk-font-sans);
+  letter-spacing: -0.035em;
+  margin: 22px 0;
+}
+.css-ui-inspector dl {
+  margin: 0;
+}
+.css-ui-inspector dl > div {
+  border-bottom: 1px solid #3b3c36;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 13px 0;
+  font: 10px/1.6 var(--dhk-font-mono);
+}
+.css-ui-inspector dt {
+  color: #babdb0;
+}
+.css-ui-inspector dd {
+  margin: 0;
+  color: #d5e9b0;
+}
+.css-ui-inspector > p {
+  font: 11px/1.8 var(--dhk-font-sans);
+}
+.css-ui-inspector pre {
+  font: 10px/1.8 var(--dhk-font-mono);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  border: 1px solid #46473f;
+  padding: 16px;
+  margin: 24px 0;
+}
+.css-ui-reason {
+  min-height: 42px;
+  color: #d5e9b0;
+}
+.css-ui-empty {
+  min-height: 320px;
+  display: grid;
+  place-content: center;
+  padding: 24px;
+  font: 13px/1.7 var(--dhk-font-mono);
+}
+.css-ui-principles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 28px;
+  margin: 36px 0;
+}
+.css-ui-principles h3 {
+  font-weight: 500;
+  font-size: 17px;
+}
+.css-ui-principles p {
+  font: 13px/1.8 var(--dhk-font-sans);
+}
+@media (max-width: 1000px) {
+  .css-ui-study {
+    grid-template-columns: 1fr;
+  }
+  .css-ui-principles {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}

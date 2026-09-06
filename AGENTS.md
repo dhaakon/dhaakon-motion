@@ -26,6 +26,7 @@ npm run check                       # types, all source tests, built ESM/CJS smo
 npm run docs:dev                     # localhost:5175
 npm run docs:check                   # production docs + lazy-route/asset budget checks
 npm run docs:smoke                   # real Chrome, built docs, deep links + cleanup
+npm run docs:verify-css-ui           # real native CSS playback, interruption, accessibility
 npm run docs:render-cue              # build + exact-frame 1080p PNG → MP4 (GStreamer)
 npm run docs:verify-cue              # build + decoded-frame image comparisons
 npm run check:all                    # full pre-handoff gate; Chrome required
@@ -76,6 +77,13 @@ then run decoded-frame image comparisons; JSON hashes alone do not prove parity.
 - Cue-sheet validation has data/resource limits, but is not a sandbox for host code.
 - `saveSheet(loaded)` preserves authored input; runtime edits require explicit
   `{ source: 'runtime' }`, whose opaque extensions/functions remain best-effort.
+
+## CSS-native interfaces
+
+For CSS-native UI work, read `docs/CSS-UI-MOTION.md`. `/css` is browser-owned
+presentation, not a replacement for the Transport or compiled engine. The React
+adapter must import `@dhaakon/motion/css` canonically to share element ownership.
+Preserve the existing `motion` API and shared reduced-motion policy.
 
 ## Experimental compiled engine
 

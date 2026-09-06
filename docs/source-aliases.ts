@@ -12,6 +12,7 @@ export const sourceAliases = Object.entries({
   devtools: 'devtools.ts',
   gesture: 'gesture/index.ts',
   compiled: 'compiled.ts',
+  css: 'css.ts',
   '': 'index.ts',
 }).map(([entry, file]) => ({
   find: new RegExp(`^@dhaakon/motion${entry ? '/' + entry : ''}$`),

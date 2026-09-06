@@ -30,6 +30,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/react.tsx
 var react_exports = {};
 __export(react_exports, {
+  CssMotionConfig: () => CssMotionConfig,
   Cue: () => Cue,
   Marker: () => Marker,
   Motion: () => Motion,
@@ -40,7 +41,9 @@ __export(react_exports, {
   Track: () => Track,
   Transport: () => Transport,
   Tween: () => Tween,
+  createCssMotionComponent: () => createCssMotionComponent,
   createMotionComponent: () => createMotionComponent,
+  cssMotion: () => cssMotion,
   motion: () => motion,
   useCue: () => useCue,
   useDrag: () => useDrag,
@@ -64,18 +67,33 @@ __export(react_exports, {
   useVelocity: () => useVelocity
 });
 module.exports = __toCommonJS(react_exports);
-var import_react = __toESM(require("react"), 1);
+var import_react3 = __toESM(require("react"), 1);
 var import_motion = require("@dhaakon/motion");
 var import_gesture = require("@dhaakon/motion/gesture");
+
+// src/react-config.tsx
+var import_react = require("react");
 var import_jsx_runtime = require("react/jsx-runtime");
 var MotionContext = (0, import_react.createContext)({ reducedMotion: "user" });
 function MotionConfig({ children, ...value }) {
   const parent = (0, import_react.useContext)(MotionContext);
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MotionContext.Provider, { value: (0, import_react.useMemo)(() => ({ ...parent, ...value, transition: { ...parent.transition, ...value.transition } }), [parent, value.transition, value.reducedMotion, value.frameRate]), children });
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+    MotionContext.Provider,
+    {
+      value: (0, import_react.useMemo)(
+        () => ({ ...parent, ...value, transition: { ...parent.transition, ...value.transition } }),
+        [parent, value.transition, value.reducedMotion, value.frameRate]
+      ),
+      children
+    }
+  );
 }
 function useReducedMotion() {
   const setting = (0, import_react.useContext)(MotionContext).reducedMotion;
-  const query = (0, import_react.useMemo)(() => typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null, []);
+  const query = (0, import_react.useMemo)(
+    () => typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null,
+    []
+  );
   const system = (0, import_react.useSyncExternalStore)(
     (listener) => {
       query?.addEventListener("change", listener);
@@ -86,11 +104,125 @@ function useReducedMotion() {
   );
   return setting === "always" || setting !== "never" && system;
 }
+
+// src/react-css.tsx
+var import_react2 = __toESM(require("react"), 1);
+var import_css = require("@dhaakon/motion/css");
+var import_jsx_runtime2 = require("react/jsx-runtime");
+var CssContext = (0, import_react2.createContext)(import_css.defaultCssMotionTokens);
+function CssMotionConfig({
+  tokens,
+  children
+}) {
+  const parent = (0, import_react2.useContext)(CssContext);
+  const value = (0, import_react2.useMemo)(() => ({ ...parent, ...tokens }), [parent, tokens]);
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(CssContext.Provider, { value, children });
+}
+var useOwnedLayoutEffect = typeof window === "undefined" ? import_react2.useEffect : import_react2.useLayoutEffect;
+function resolveVariant(value, variants) {
+  if (typeof value !== "string") return value;
+  if (!variants || !Object.hasOwn(variants, value))
+    throw new Error(`Unknown CSS variant: ${value}`);
+  return variants[value];
+}
+function createCssMotionComponent(tag) {
+  const Component = (0, import_react2.forwardRef)(
+    function CssMotionElement(rawProps, forwardedRef) {
+      const {
+        initial,
+        animate,
+        variants,
+        transition,
+        onMotionStart,
+        onMotionComplete,
+        style,
+        ...props
+      } = rawProps;
+      const tokens = (0, import_react2.useContext)(CssContext);
+      const reduced = useReducedMotion();
+      const target = resolveVariant(animate, variants);
+      const timing = typeof transition === "string" ? Object.hasOwn(tokens, transition) ? tokens[transition] : (() => {
+        throw new Error(`Unknown CSS motion token: ${transition}`);
+      })() : transition ?? tokens.feedback;
+      const first = (0, import_react2.useRef)({
+        value: !reduced && initial ? { ...resolveVariant(initial, variants) } : { ...target },
+        shouldAnimate: initial !== void 0 && initial !== false
+      });
+      const node = (0, import_react2.useRef)(null);
+      const owner = (0, import_react2.useRef)(null);
+      const fresh = (0, import_react2.useRef)(true);
+      const callbacks = (0, import_react2.useRef)({ onMotionStart, onMotionComplete });
+      callbacks.current = { onMotionStart, onMotionComplete };
+      const targetKey = JSON.stringify(target);
+      useOwnedLayoutEffect(() => {
+        if (!node.current) return;
+        const animator = (0, import_css.createCssAnimator)(node.current);
+        owner.current = animator;
+        fresh.current = true;
+        try {
+          animator.set(first.current.value);
+        } catch (error) {
+          owner.current = null;
+          animator.dispose();
+          throw error;
+        }
+        return () => {
+          owner.current = null;
+          animator.dispose();
+        };
+      }, []);
+      useOwnedLayoutEffect(() => {
+        const animator = owner.current;
+        if (!animator) return;
+        let valid = true;
+        const skipEntry = fresh.current && !first.current.shouldAnimate;
+        fresh.current = false;
+        const playback = animator.animate(target, {
+          ...timing,
+          duration: skipEntry ? 0 : timing.duration,
+          reducedMotion: reduced
+        });
+        callbacks.current.onMotionStart?.(playback);
+        void playback.finished.then((result) => {
+          if (valid && result.status === "finished") callbacks.current.onMotionComplete?.(result);
+        });
+        return () => {
+          valid = false;
+        };
+      }, [targetKey, timing.duration, timing.delay, timing.easing, reduced]);
+      const ref = (0, import_react2.useMemo)(
+        () => (element) => {
+          node.current = element;
+          if (typeof forwardedRef === "function") forwardedRef(element);
+          else if (forwardedRef) forwardedRef.current = element;
+        },
+        [forwardedRef]
+      );
+      return import_react2.default.createElement(tag, {
+        ...props,
+        ref,
+        style: { ...style, ...first.current.value }
+      });
+    }
+  );
+  Component.displayName = `CssMotion(${typeof tag === "string" ? tag : "Component"})`;
+  return Component;
+}
+var cssMotion = {
+  div: createCssMotionComponent("div"),
+  section: createCssMotionComponent("section"),
+  article: createCssMotionComponent("article"),
+  span: createCssMotionComponent("span"),
+  button: createCssMotionComponent("button")
+};
+
+// src/react.tsx
+var import_jsx_runtime3 = require("react/jsx-runtime");
 function useInView({ once = true, amount = "some", margin = "0px", disabled = false } = {}) {
-  const ref = (0, import_react.useRef)(null);
+  const ref = (0, import_react3.useRef)(null);
   const reduced = useReducedMotion();
-  const [inView, setInView] = (0, import_react.useState)(disabled || reduced);
-  (0, import_react.useEffect)(() => {
+  const [inView, setInView] = (0, import_react3.useState)(disabled || reduced);
+  (0, import_react3.useEffect)(() => {
     if (disabled || reduced || typeof IntersectionObserver === "undefined") {
       setInView(true);
       return;
@@ -109,23 +241,23 @@ function useInView({ once = true, amount = "some", margin = "0px", disabled = fa
   return [ref, inView];
 }
 function useMotionValue(initial) {
-  const ref = (0, import_react.useRef)(null);
+  const ref = (0, import_react3.useRef)(null);
   if (!ref.current) ref.current = new import_motion.MotionValue(initial);
-  (0, import_react.useEffect)(() => () => ref.current?.stop(), []);
+  (0, import_react3.useEffect)(() => () => ref.current?.stop(), []);
   return ref.current;
 }
 function useMotionValueState(value) {
-  return (0, import_react.useSyncExternalStore)(value.subscribe, () => value.get(), () => value.get());
+  return (0, import_react3.useSyncExternalStore)(value.subscribe, () => value.get(), () => value.get());
 }
 function useTween(from, to, options = {}) {
   const motionValue = useMotionValue(from);
-  const tween = (0, import_react.useRef)(null);
+  const tween = (0, import_react3.useRef)(null);
   const reduced = useReducedMotion();
-  const config = (0, import_react.useContext)(MotionContext);
+  const config = (0, import_react3.useContext)(MotionContext);
   const transition = config.transition;
   const fromKey = stableKey(from);
   const toKey = stableKey(to);
-  (0, import_react.useEffect)(() => {
+  (0, import_react3.useEffect)(() => {
     motionValue.set(from);
     tween.current = motionValue.animate(to, { frameRate: config.frameRate, ...transition, ...options, duration: reduced ? 0 : options.duration ?? transition?.duration });
     return () => {
@@ -135,8 +267,8 @@ function useTween(from, to, options = {}) {
   return { value: useMotionValueState(motionValue), motionValue, controls: tween };
 }
 function useTimeline(factory, dependencies = []) {
-  const timeline = (0, import_react.useRef)(null);
-  (0, import_react.useEffect)(() => {
+  const timeline = (0, import_react3.useRef)(null);
+  (0, import_react3.useEffect)(() => {
     timeline.current = factory();
     return () => {
       timeline.current?.stop();
@@ -147,10 +279,10 @@ function useTimeline(factory, dependencies = []) {
 }
 function Motion({ from, to, children, ...options }) {
   const result = useTween(from, to, options);
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_jsx_runtime.Fragment, { children: children(result.value, result.controls) });
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_jsx_runtime3.Fragment, { children: children(result.value, result.controls) });
 }
 function createMotionComponent(tag) {
-  const Component = (0, import_react.forwardRef)(function DhaakonMotionElement(rawProps, forwardedRef) {
+  const Component = (0, import_react3.forwardRef)(function DhaakonMotionElement(rawProps, forwardedRef) {
     const {
       as,
       initial,
@@ -186,28 +318,28 @@ function createMotionComponent(tag) {
       onMotionComplete,
       ...props
     } = rawProps;
-    const localRef = (0, import_react.useRef)(null);
-    const config = (0, import_react.useContext)(MotionContext);
+    const localRef = (0, import_react3.useRef)(null);
+    const config = (0, import_react3.useContext)(MotionContext);
     const reduced = useReducedMotion();
-    const gestureHandlers = (0, import_react.useRef)({ onTap, onLongPress, onPanStart, onPan, onPanEnd, onPinch, onDragStart, onDrag, onDragEnd });
+    const gestureHandlers = (0, import_react3.useRef)({ onTap, onLongPress, onPanStart, onPan, onPanEnd, onPinch, onDragStart, onDrag, onDragEnd });
     gestureHandlers.current = { onTap, onLongPress, onPanStart, onPan, onPanEnd, onPinch, onDragStart, onDrag, onDragEnd };
-    const dragBoundsRef = (0, import_react.useRef)(dragBounds);
+    const dragBoundsRef = (0, import_react3.useRef)(dragBounds);
     dragBoundsRef.current = dragBounds;
     const [inViewRef, inView] = useInView({ ...viewport, disabled: !whileInView });
-    const hasAnimated = (0, import_react.useRef)(false);
-    const visual = (0, import_react.useRef)({});
-    const interactionTween = (0, import_react.useRef)(null);
-    (0, import_react.useImperativeHandle)(forwardedRef, () => localRef.current);
+    const hasAnimated = (0, import_react3.useRef)(false);
+    const visual = (0, import_react3.useRef)({});
+    const interactionTween = (0, import_react3.useRef)(null);
+    (0, import_react3.useImperativeHandle)(forwardedRef, () => localRef.current);
     const initialKey = stableKey(initial);
     const targetKey = stableKey(target);
     const viewKey = stableKey(whileInView);
-    (0, import_react.useLayoutEffect)(() => {
+    (0, import_react3.useLayoutEffect)(() => {
       if (localRef.current && initial) {
         visual.current = { ...initial };
         (0, import_motion.writeStyle)(localRef.current, initial);
       }
     }, [initialKey]);
-    (0, import_react.useEffect)(() => {
+    (0, import_react3.useEffect)(() => {
       const node = localRef.current;
       const activeTarget = whileInView ? inView ? whileInView : initial || void 0 : target;
       if (!node || !activeTarget) return;
@@ -242,7 +374,7 @@ function createMotionComponent(tag) {
     const focusKey = stableKey(whileFocus);
     const boundsKey = typeof dragBounds === "function" ? "function" : stableKey(dragBounds);
     const snapKey = stableKey(dragSnap);
-    (0, import_react.useEffect)(() => {
+    (0, import_react3.useEffect)(() => {
       const node = localRef.current;
       if (!node) return;
       let liveDragValues;
@@ -368,7 +500,7 @@ function createMotionComponent(tag) {
         disposers.forEach((dispose) => dispose());
       };
     }, [hoverKey, tapKey, dragKey, focusKey, boundsKey, snapKey, Boolean(drag), dragAxis, dragElastic, dragMomentum, dragPropagation, dragListener, dragKeyboard, Boolean(onTap), Boolean(onLongPress), Boolean(onPanStart || onPan || onPanEnd), Boolean(onPinch), dragControls, reduced]);
-    return import_react.default.createElement(as || tag, { ...props, style, ref: (node) => {
+    return import_react3.default.createElement(as || tag, { ...props, style, ref: (node) => {
       localRef.current = node;
       inViewRef.current = node;
     } });
@@ -389,16 +521,16 @@ var motion = new Proxy({}, { get: (_, tag) => {
 } });
 function useGesture(ref, recognizers) {
   const key = recognizers.map((recognizer) => recognizer.kind).join("|");
-  (0, import_react.useEffect)(() => {
+  (0, import_react3.useEffect)(() => {
     if (!ref.current) return;
     const arena = new import_gesture.GestureArena(ref.current, recognizers);
     return () => arena.dispose();
   }, [ref, key]);
 }
 function useDrag(ref, target, options = {}) {
-  const controls = (0, import_react.useRef)(null);
+  const controls = (0, import_react3.useRef)(null);
   const key = stableKey(options);
-  (0, import_react.useEffect)(() => {
+  (0, import_react3.useEffect)(() => {
     if (!ref.current) return;
     controls.current = (0, import_gesture.drag)(target, ref.current, options);
     return () => {
@@ -410,25 +542,25 @@ function useDrag(ref, target, options = {}) {
 }
 function usePinch(ref, options) {
   const key = stableKey(options);
-  (0, import_react.useEffect)(() => {
+  (0, import_react3.useEffect)(() => {
     if (!ref.current) return;
     const binding = (0, import_gesture.transformGesture)(ref.current, options);
     return binding.dispose;
   }, [ref, key]);
 }
 function useScrub(ref, transport, options = {}) {
-  const inherited = (0, import_react.useContext)(TransportContext);
+  const inherited = (0, import_react3.useContext)(TransportContext);
   const active = transport ?? inherited;
   const key = stableKey(options);
-  (0, import_react.useEffect)(() => {
+  (0, import_react3.useEffect)(() => {
     if (!ref.current || !active) return;
     const binding = (0, import_gesture.scrub)(active, ref.current, options);
     return binding.dispose;
   }, [ref, active, key]);
 }
 function useDragControls() {
-  const active = (0, import_react.useRef)(null);
-  return (0, import_react.useMemo)(() => ({ start: (event) => active.current?.start(event), cancel: () => active.current?.cancel(), _bind: (control) => {
+  const active = (0, import_react3.useRef)(null);
+  return (0, import_react3.useMemo)(() => ({ start: (event) => active.current?.start(event), cancel: () => active.current?.cancel(), _bind: (control) => {
     active.current = control;
   }, _unbind: (control) => {
     if (active.current === control) active.current = null;
@@ -436,12 +568,12 @@ function useDragControls() {
 }
 function useVelocity(value) {
   const output = useMotionValue(value.velocity);
-  (0, import_react.useEffect)(() => value.subscribe(() => output.set(value.velocity)), [value, output]);
+  (0, import_react3.useEffect)(() => value.subscribe(() => output.set(value.velocity)), [value, output]);
   return output;
 }
 function useIsPressed(ref) {
   const state = useMotionValue(false);
-  (0, import_react.useEffect)(() => {
+  (0, import_react3.useEffect)(() => {
     if (!ref.current) return;
     const binding = (0, import_gesture.press)(ref.current, { onChange: (value) => state.set(value) });
     return binding.dispose;
@@ -450,7 +582,7 @@ function useIsPressed(ref) {
 }
 function useIsHovered(ref) {
   const state = useMotionValue(false);
-  (0, import_react.useEffect)(() => {
+  (0, import_react3.useEffect)(() => {
     if (!ref.current) return;
     const binding = (0, import_gesture.hover)(ref.current, { onChange: (value) => state.set(value) });
     return binding.dispose;
@@ -458,12 +590,12 @@ function useIsHovered(ref) {
   return useMotionValueState(state);
 }
 function Reveal({ from = { y: 28, opacity: 0 }, to = { y: 0, opacity: 1 }, once = true, amount = "some", margin = "0px 0px -8% 0px", ...props }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(motion.div, { ...props, initial: from, whileInView: to, viewport: { once, amount, margin } });
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(motion.div, { ...props, initial: from, whileInView: to, viewport: { once, amount, margin } });
 }
-var SequenceContext = (0, import_react.createContext)(null);
-var TransportContext = (0, import_react.createContext)(null);
+var SequenceContext = (0, import_react3.createContext)(null);
+var TransportContext = (0, import_react3.createContext)(null);
 function requireSequence(componentName) {
-  const value = (0, import_react.useContext)(SequenceContext);
+  const value = (0, import_react3.useContext)(SequenceContext);
   if (!value) throw new Error(`<${componentName}> (or use${componentName}()) must be used inside <Transport>, directly or nested inside a <Sequence>.`);
   return value;
 }
@@ -528,10 +660,10 @@ function createSequenceValue(timeline, onRebuilt) {
 function Transport(props) {
   const reduced = useReducedMotion();
   const respect = props.respectReducedMotion !== false;
-  const ownsInstance = (0, import_react.useRef)(false);
-  const loopRef = (0, import_react.useRef)(props.loop);
+  const ownsInstance = (0, import_react3.useRef)(false);
+  const loopRef = (0, import_react3.useRef)(props.loop);
   loopRef.current = props.loop;
-  const instanceRef = (0, import_react.useRef)(null);
+  const instanceRef = (0, import_react3.useRef)(null);
   if (!instanceRef.current) {
     if (props.transport) {
       instanceRef.current = props.transport;
@@ -542,21 +674,21 @@ function Transport(props) {
     }
   }
   const transport = instanceRef.current;
-  (0, import_react.useEffect)(() => () => {
+  (0, import_react3.useEffect)(() => () => {
     if (ownsInstance.current) transport.dispose();
   }, [transport]);
-  (0, import_react.useEffect)(() => {
+  (0, import_react3.useEffect)(() => {
     const detachers = (props.outputs ?? []).map((output) => transport.attach(output));
     return () => {
       detachers.forEach((detach) => detach());
     };
   }, [transport, stableKey(props.outputs?.map((o) => o.name))]);
-  const onStateChangeRef = (0, import_react.useRef)(props.onStateChange);
+  const onStateChangeRef = (0, import_react3.useRef)(props.onStateChange);
   onStateChangeRef.current = props.onStateChange;
-  (0, import_react.useEffect)(() => transport.attach({ onStateChange: (state) => onStateChangeRef.current?.(state) }), [transport]);
-  const onFinishRef = (0, import_react.useRef)(props.onFinish);
+  (0, import_react3.useEffect)(() => transport.attach({ onStateChange: (state) => onStateChangeRef.current?.(state) }), [transport]);
+  const onFinishRef = (0, import_react3.useRef)(props.onFinish);
   onFinishRef.current = props.onFinish;
-  (0, import_react.useEffect)(() => {
+  (0, import_react3.useEffect)(() => {
     let cancelled = false;
     transport.finished.then(() => {
       if (!cancelled) onFinishRef.current?.();
@@ -567,7 +699,7 @@ function Transport(props) {
   }, [transport, transport.state]);
   const controlled = props.paused !== void 0;
   const shouldRun = (props.autoplay || controlled) && props.paused !== true && !(respect && reduced);
-  (0, import_react.useEffect)(() => {
+  (0, import_react3.useEffect)(() => {
     if (!props.autoplay && !controlled) return;
     if (respect && reduced) {
       transport.seek(transport.duration);
@@ -580,23 +712,23 @@ function Transport(props) {
       transport.pause();
     }
   }, [transport, shouldRun, respect, reduced]);
-  const sequenceValue = (0, import_react.useMemo)(
+  const sequenceValue = (0, import_react3.useMemo)(
     () => createSequenceValue(transport.root, () => {
       if (ownsInstance.current) transport.setLoop(loopRef.current);
       transport.seek(transport.time, { cues: "skip" });
     }),
     [transport]
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TransportContext.Provider, { value: transport, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SequenceContext.Provider, { value: sequenceValue, children: props.children }) });
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(TransportContext.Provider, { value: transport, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SequenceContext.Provider, { value: sequenceValue, children: props.children }) });
 }
 function useTransport() {
-  const transport = (0, import_react.useContext)(TransportContext);
+  const transport = (0, import_react3.useContext)(TransportContext);
   if (!transport) throw new Error("useTransport() must be called inside <Transport>.");
   return transport;
 }
 function useTransportState() {
   const transport = useTransport();
-  const snapshotRef = (0, import_react.useRef)({ state: transport.state, rate: transport.rate, duration: transport.duration, frameRate: transport.frameRate });
+  const snapshotRef = (0, import_react3.useRef)({ state: transport.state, rate: transport.rate, duration: transport.duration, frameRate: transport.frameRate });
   const getSnapshot = () => {
     const prev = snapshotRef.current;
     if (prev.state !== transport.state || prev.rate !== transport.rate || prev.duration !== transport.duration || prev.frameRate !== transport.frameRate) {
@@ -604,7 +736,7 @@ function useTransportState() {
     }
     return snapshotRef.current;
   };
-  return (0, import_react.useSyncExternalStore)(
+  return (0, import_react3.useSyncExternalStore)(
     (listener) => transport.attach({ onStateChange: () => listener(), onRateChange: () => listener() }),
     getSnapshot,
     getSnapshot
@@ -613,8 +745,8 @@ function useTransportState() {
 function usePlayhead(options = {}) {
   const transport = useTransport();
   const fps = Math.max(1, options.fps ?? 30);
-  const [snapshot, setSnapshot] = (0, import_react.useState)(() => ({ time: transport.time, frame: transport.frame, timecode: transport.timecode, progress: transport.progress }));
-  (0, import_react.useEffect)(() => {
+  const [snapshot, setSnapshot] = (0, import_react3.useState)(() => ({ time: transport.time, frame: transport.frame, timecode: transport.timecode, progress: transport.progress }));
+  (0, import_react3.useEffect)(() => {
     const minInterval = 1e3 / fps;
     let last = 0;
     let trailing;
@@ -643,30 +775,30 @@ function usePlayhead(options = {}) {
 function usePlayheadValue() {
   const transport = useTransport();
   const motionValue = useMotionValue(transport.time);
-  (0, import_react.useEffect)(() => transport.subscribe((info) => motionValue.set(info.time)), [transport, motionValue]);
+  (0, import_react3.useEffect)(() => transport.subscribe((info) => motionValue.set(info.time)), [transport, motionValue]);
   return motionValue;
 }
 function useCue(at, handler, deps = []) {
   const parent = requireSequence("Cue");
-  const id = (0, import_react.useId)();
-  const handlerRef = (0, import_react.useRef)(handler);
+  const id = (0, import_react3.useId)();
+  const handlerRef = (0, import_react3.useRef)(handler);
   handlerRef.current = handler;
-  const stableHandler = (0, import_react.useRef)((e) => handlerRef.current(e)).current;
-  (0, import_react.useLayoutEffect)(() => {
+  const stableHandler = (0, import_react3.useRef)((e) => handlerRef.current(e)).current;
+  (0, import_react3.useLayoutEffect)(() => {
     parent.registerCue(id, { name: id, at, handler: stableHandler });
     return () => parent.unregisterCue(id);
   }, [parent, id, stableKey(at), ...deps]);
 }
 function Track({ target, keyframes, at, ...options }) {
   const parent = requireSequence("Track");
-  const id = (0, import_react.useId)();
+  const id = (0, import_react3.useId)();
   const key = `${stableKey(keyframes)}:${stableKey(options)}`;
-  const built = (0, import_react.useRef)(null);
+  const built = (0, import_react3.useRef)(null);
   if (!built.current || built.current.key !== key) {
     const item = target instanceof import_motion.MotionValue ? new import_motion.Track({ ...options, keyframes, target }) : new import_motion.Track({ ...options, keyframes, apply: target });
     built.current = { item, key };
   }
-  (0, import_react.useLayoutEffect)(() => {
+  (0, import_react3.useLayoutEffect)(() => {
     parent.register(id, built.current.item, at);
     return () => parent.unregister(id);
   }, [parent, id, stableKey(at), key]);
@@ -674,14 +806,14 @@ function Track({ target, keyframes, at, ...options }) {
 }
 function Tween({ target, from, to, at, ...options }) {
   const parent = requireSequence("Tween");
-  const id = (0, import_react.useId)();
+  const id = (0, import_react3.useId)();
   const key = `${stableKey(from)}:${stableKey(to)}:${stableKey(options)}`;
-  const built = (0, import_react.useRef)(null);
+  const built = (0, import_react3.useRef)(null);
   if (!built.current || built.current.key !== key) {
     const write = target instanceof import_motion.MotionValue ? (value) => target.set(value) : target;
     built.current = { item: new import_motion.Tween({ ...options, from, to, onUpdate: (value) => write(value) }), key };
   }
-  (0, import_react.useLayoutEffect)(() => {
+  (0, import_react3.useLayoutEffect)(() => {
     parent.register(id, built.current.item, at);
     return () => parent.unregister(id);
   }, [parent, id, stableKey(at), key]);
@@ -689,8 +821,8 @@ function Tween({ target, from, to, at, ...options }) {
 }
 function Marker({ name, at, color, payload }) {
   const parent = requireSequence("Marker");
-  const id = (0, import_react.useId)();
-  (0, import_react.useLayoutEffect)(() => {
+  const id = (0, import_react3.useId)();
+  (0, import_react3.useLayoutEffect)(() => {
     parent.registerMarker(id, { name, at, options: { color, payload } });
     return () => parent.unregisterMarker(id);
   }, [parent, id, name, stableKey(at), color, stableKey(payload)]);
@@ -698,11 +830,11 @@ function Marker({ name, at, color, payload }) {
 }
 function Cue({ name, at, onFire, payload, once }) {
   const parent = requireSequence("Cue");
-  const id = (0, import_react.useId)();
-  const handlerRef = (0, import_react.useRef)(onFire);
+  const id = (0, import_react3.useId)();
+  const handlerRef = (0, import_react3.useRef)(onFire);
   handlerRef.current = onFire;
-  const stableHandler = (0, import_react.useRef)((e) => handlerRef.current(e)).current;
-  (0, import_react.useLayoutEffect)(() => {
+  const stableHandler = (0, import_react3.useRef)((e) => handlerRef.current(e)).current;
+  (0, import_react3.useLayoutEffect)(() => {
     parent.registerCue(id, { name, at, handler: stableHandler, options: { payload, once } });
     return () => parent.unregisterCue(id);
   }, [parent, id, name, stableKey(at), stableKey(payload), once]);
@@ -710,14 +842,14 @@ function Cue({ name, at, onFire, payload, once }) {
 }
 function Region({ name, from, to, onEnter, onExit, payload, once }) {
   const parent = requireSequence("Region");
-  const id = (0, import_react.useId)();
-  const enterRef = (0, import_react.useRef)(onEnter);
+  const id = (0, import_react3.useId)();
+  const enterRef = (0, import_react3.useRef)(onEnter);
   enterRef.current = onEnter;
-  const exitRef = (0, import_react.useRef)(onExit);
+  const exitRef = (0, import_react3.useRef)(onExit);
   exitRef.current = onExit;
-  const stableEnter = (0, import_react.useRef)((e) => enterRef.current?.(e)).current;
-  const stableExit = (0, import_react.useRef)((e) => exitRef.current?.(e)).current;
-  (0, import_react.useLayoutEffect)(() => {
+  const stableEnter = (0, import_react3.useRef)((e) => enterRef.current?.(e)).current;
+  const stableExit = (0, import_react3.useRef)((e) => exitRef.current?.(e)).current;
+  (0, import_react3.useLayoutEffect)(() => {
     parent.registerRegion(id, { name, from, to, options: { payload, once, onEnter: stableEnter, onExit: stableExit } });
     return () => parent.unregisterRegion(id);
   }, [parent, id, name, stableKey(from), stableKey(to), stableKey(payload), once]);
@@ -725,21 +857,21 @@ function Region({ name, from, to, onEnter, onExit, payload, once }) {
 }
 function Sequence({ name, at, repeat, repeatDelay, yoyo, frameRate, snap, onComplete, children }) {
   const parent = requireSequence("Sequence");
-  const id = (0, import_react.useId)();
-  const timelineRef = (0, import_react.useRef)(null);
+  const id = (0, import_react3.useId)();
+  const timelineRef = (0, import_react3.useRef)(null);
   if (!timelineRef.current) timelineRef.current = new import_motion.Timeline({ name, repeat, repeatDelay, yoyo, frameRate, snap, onComplete });
   const timeline = timelineRef.current;
-  const valueRef = (0, import_react.useRef)(null);
+  const valueRef = (0, import_react3.useRef)(null);
   if (!valueRef.current) valueRef.current = createSequenceValue(timeline, () => parent.invalidate());
-  (0, import_react.useLayoutEffect)(() => {
+  (0, import_react3.useLayoutEffect)(() => {
     parent.register(id, timeline, at);
     return () => parent.unregister(id);
   }, [parent, id, stableKey(at)]);
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SequenceContext.Provider, { value: valueRef.current, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(SequenceContext.Provider, { value: valueRef.current, children });
 }
 function useSceneState(targets) {
-  const [state, setState] = (0, import_react.useState)(() => (0, import_motion.captureScene)(targets));
-  const targetsRef = (0, import_react.useRef)(targets);
+  const [state, setState] = (0, import_react3.useState)(() => (0, import_motion.captureScene)(targets));
+  const targetsRef = (0, import_react3.useRef)(targets);
   targetsRef.current = targets;
   const set = (next, transition) => {
     (0, import_motion.applyScene)(next, targetsRef.current, transition ? { transition } : void 0);
@@ -749,6 +881,7 @@ function useSceneState(targets) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  CssMotionConfig,
   Cue,
   Marker,
   Motion,
@@ -759,7 +892,9 @@ function useSceneState(targets) {
   Track,
   Transport,
   Tween,
+  createCssMotionComponent,
   createMotionComponent,
+  cssMotion,
   motion,
   useCue,
   useDrag,

@@ -16,14 +16,14 @@ export default function OverviewPage() {
           </p>
           <code>npm i @dhaakon/motion</code>
         </div>
-        <a className="overview-feature" href="/svg-cue-sheet">
-          <span>FEATURED EXPERIMENT / 24 FPS</span>
+        <a className="overview-feature" href="/css-ui">
+          <span>NEW / CSS + DHAAKON UI</span>
           <div className="atlas-mark" aria-hidden="true">
             ◇
           </div>
-          <h3>Ink / Signal</h3>
-          <p>Five acts. 23 SVG targets. A 1080p offline master.</p>
-          <b>Open the comparison ↗</b>
+          <h3>Intent, then motion.</h3>
+          <p>Shared tokens. Native CSS playback. Accessible interaction.</p>
+          <b>Open the UI study ↗</b>
         </a>
       </div>
       <div className="architecture-strip">

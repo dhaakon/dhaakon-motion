@@ -18,24 +18,11 @@ export type { MotionStyle };
 // Note: this entry's `Tween`/`Track` exports are the React components below (JSX elements), not the
 // core classes — import those from '@dhaakon/motion' directly when you need them imperatively.
 
-export interface MotionTransition { duration?: TimeInput; delay?: TimeInput; repeat?: number; repeatDelay?: TimeInput; yoyo?: boolean; easing?: EasingFunction | EasingName; frameRate?: FrameRateInput; }
-export interface MotionConfigValue { transition?: MotionTransition; reducedMotion?: 'user' | 'always' | 'never'; frameRate?: FrameRateInput; }
-const MotionContext = createContext<MotionConfigValue>({ reducedMotion: 'user' });
-
-export function MotionConfig({ children, ...value }: MotionConfigValue & { children: React.ReactNode }) {
-  const parent = useContext(MotionContext);
-  return <MotionContext.Provider value={useMemo(() => ({ ...parent, ...value, transition: { ...parent.transition, ...value.transition } }), [parent, value.transition, value.reducedMotion, value.frameRate])}>{children}</MotionContext.Provider>;
-}
-
-export function useReducedMotion() {
-  const setting = useContext(MotionContext).reducedMotion;
-  const query = useMemo(() => typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null, []);
-  const system = useSyncExternalStore(
-    (listener) => { query?.addEventListener('change', listener); return () => query?.removeEventListener('change', listener); },
-    () => query?.matches ?? false, () => false,
-  );
-  return setting === 'always' || (setting !== 'never' && system);
-}
+import { MotionContext, useReducedMotion, type MotionTransition } from './react-config';
+export { MotionConfig, useReducedMotion } from './react-config';
+export type { MotionTransition, MotionConfigValue } from './react-config';
+export { cssMotion, createCssMotionComponent, CssMotionConfig } from './react-css';
+export type { CssMotionProps, CssVariants } from './react-css';
 
 export interface InViewOptions {
   once?: boolean;

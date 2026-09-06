@@ -21,6 +21,15 @@ Explore its [advanced experimental demos](http://dhaakon-ubuntu:21764/rust/exper
 and [scope, lifecycle and verification notes](docs/RUST-EXPERIMENTAL.md).
 It does not change the stable `latest` tag or automatically accelerate existing imports.
 
+## CSS-first interfaces (development branch)
+
+The new `/css-ui` docs page demonstrates browser-owned CSS motion with Dhaakon UI:
+shared timing tokens, named CSS variants, interrupted transitions, reduced motion
+and an accessible disclosure. Use `cssMotion` from `/react` and the optional `/css`
+entry; existing `motion`/Transport APIs and opt-in Rust/Wasm graphics remain separate.
+See [the API, ownership rules and scope](docs/CSS-UI-MOTION.md). This branch's feature
+has not been published or deployed merely by building it locally.
+
 ## Core
 
 ```ts

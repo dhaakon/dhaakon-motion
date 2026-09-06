@@ -14,6 +14,11 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./css": {
+      "types": "./dist/css.d.ts",
+      "import": "./dist/css.js",
+      "require": "./dist/css.cjs"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
@@ -85,7 +90,8 @@
     "docs:render-cue": "npm run docs:build && node docs/scripts/render-cue.mjs",
     "docs:verify-cue": "npm run docs:build && node docs/scripts/verify-cue.mjs",
     "docs:verify-rust": "npm run docs:build && node docs/scripts/verify-rust.mjs",
-    "check:all": "npm run check && npm run docs:check && npm run docs:smoke && node docs/scripts/verify-rust.mjs && node docs/scripts/verify-cue.mjs",
+    "docs:verify-css-ui": "npm run docs:build && node docs/scripts/verify-css-ui.mjs",
+    "check:all": "npm run check && npm run docs:check && npm run docs:smoke && node docs/scripts/verify-css-ui.mjs && node docs/scripts/verify-rust.mjs && node docs/scripts/verify-cue.mjs",
     "bench:gestures": "npm run build && node docs/scripts/gesture-bench.mjs",
     "format:docs": "prettier --write docs/src/App.tsx docs/src/routes.ts docs/src/router.ts docs/src/routes.css docs/src/pages docs/src/labs docs/src/examples docs/src/components docs/src/AdvancedCueSheetLab.tsx docs/src/advancedCueSheet.ts docs/src/cue-sheet docs/scripts docs/source-aliases.ts",
     "format:check": "prettier --check docs/src/App.tsx docs/src/routes.ts docs/src/router.ts docs/src/routes.css docs/src/pages docs/src/labs docs/src/examples docs/src/components docs/src/AdvancedCueSheetLab.tsx docs/src/advancedCueSheet.ts docs/src/cue-sheet docs/scripts docs/source-aliases.ts"

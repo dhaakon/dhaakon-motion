@@ -1,0 +1,257 @@
+/** Browser-owned CSS transitions. No browser access, clock or Wasm at import time. */
+export type CssTarget = Readonly<Record<string, string | number>>;
+export interface CssTransition {
+  duration?: number;
+  delay?: number;
+  easing?: string;
+}
+export type CssMotionTokens = Readonly<Record<string, Readonly<CssTransition>>>;
+export interface CssPlaybackResult {
+  status: 'finished' | 'cancelled';
+  backend: 'waapi' | 'instant';
+  reason?: string;
+}
+export interface CssPlayback {
+  readonly backend: 'waapi' | 'instant';
+  readonly finished: Promise<CssPlaybackResult>;
+  cancel(): void;
+}
+export interface CssAnimator {
+  animate(target: CssTarget, options?: CssTransition & { reducedMotion?: boolean }): CssPlayback;
+  set(target: CssTarget): void;
+  /** Cancels native effects and restores the inline declarations this owner acquired. */
+  dispose(): void;
+}
+
+export const defaultCssMotionTokens: CssMotionTokens = Object.freeze({
+  'surface.enter': Object.freeze({ duration: 360, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }),
+  'surface.exit': Object.freeze({ duration: 120, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }),
+  feedback: Object.freeze({ duration: 200, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }),
+});
+
+function milliseconds(value: string): number {
+  const match = /^\s*(\d+(?:\.\d+)?|\.\d+)(ms|s)\s*$/.exec(value);
+  if (!match) throw new Error(`Expected a CSS duration in ms or s: ${value}`);
+  const result = Number(match[1]) * (match[2] === 's' ? 1000 : 1);
+  if (!Number.isFinite(result)) throw new Error('CSS duration must be finite');
+  return result;
+}
+
+/** Pass @dhaakon/ui's tokens.motion. This adapter does not import or require the UI package. */
+export function createCssMotionTokens(source: {
+  duration: string;
+  durationFast: string;
+  durationSlow: string;
+  ease: string;
+}): CssMotionTokens {
+  return Object.freeze({
+    'surface.enter': Object.freeze({
+      duration: milliseconds(source.durationSlow),
+      easing: source.ease,
+    }),
+    'surface.exit': Object.freeze({
+      duration: milliseconds(source.durationFast),
+      easing: source.ease,
+    }),
+    feedback: Object.freeze({ duration: milliseconds(source.duration), easing: source.ease }),
+  });
+}
+
+type Declarations = Map<string, string>;
+const owners = new WeakMap<HTMLElement, CssAnimator>();
+const cssName = (key: string) =>
+  key.startsWith('--')
+    ? key
+    : key === 'cssFloat'
+      ? 'float'
+      : key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`).replace(/^ms-/, '-ms-');
+const frameName = (key: string) =>
+  key.startsWith('--')
+    ? key
+    : key === 'offset'
+      ? 'cssOffset'
+      : key.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
+
+function normalize(element: HTMLElement, input: CssTarget): Declarations {
+  if (
+    !input ||
+    (Object.getPrototypeOf(input) !== Object.prototype && Object.getPrototypeOf(input) !== null)
+  )
+    throw new Error('CSS targets must be plain property records');
+  const result: Declarations = new Map();
+  const probe = element.ownerDocument.createElement('div').style;
+  for (const key of Object.keys(input)) {
+    const descriptor = Object.getOwnPropertyDescriptor(input, key)!;
+    if (!('value' in descriptor)) throw new Error('CSS target accessors are unsupported');
+    const value = descriptor.value;
+    if (
+      (typeof value !== 'string' && typeof value !== 'number') ||
+      (typeof value === 'number' && !Number.isFinite(value))
+    )
+      throw new Error(`Invalid CSS value for ${key}`);
+    const property = cssName(key);
+    if (
+      !/^(--[\w-]+|-?[a-z][a-z0-9-]*)$/.test(property) ||
+      /^(animation|transition)(-|$)/.test(property) ||
+      property === 'all'
+    )
+      throw new Error(`CSS motion cannot own ${key}`);
+    probe.setProperty(property, String(value));
+    const normalized = probe.getPropertyValue(property);
+    if (!normalized.trim() || String(value).includes('!important'))
+      throw new Error(`Unsupported CSS declaration: ${key}: ${value}`);
+    if (result.has(property)) throw new Error(`Duplicate CSS property: ${property}`);
+    result.set(property, normalized);
+    probe.removeProperty(property);
+  }
+  if (result.size > 128) throw new Error('CSS target property limit exceeded');
+  return result;
+}
+
+/** One exclusive CSS animator per element; do not independently animate its owned properties. */
+export function createCssAnimator(element: HTMLElement): CssAnimator {
+  if (owners.has(element)) throw new Error('This element already has a CSS motion owner');
+  const originals = new Map<string, { value: string; priority: string }>();
+  let disposed = false;
+  let active:
+    | { animation: Animation; target: Declarations; settle(result: CssPlaybackResult): void }
+    | undefined;
+  const live = () => {
+    if (disposed) throw new Error('CSS animator is disposed');
+  };
+  const acquire = (target: Declarations) => {
+    for (const property of target.keys())
+      if (!originals.has(property))
+        originals.set(property, {
+          value: element.style.getPropertyValue(property),
+          priority: element.style.getPropertyPriority(property),
+        });
+  };
+  const write = (target: Declarations) => {
+    for (const [property, value] of target) element.style.setProperty(property, value);
+  };
+  const snapshot = (properties: Iterable<string>): Declarations => {
+    const computed = element.ownerDocument.defaultView!.getComputedStyle(element);
+    return new Map(
+      [...properties].map((property) => [property, computed.getPropertyValue(property)]),
+    );
+  };
+  const cancel = (preserve: boolean) => {
+    const previous = active;
+    if (!previous) return;
+    // Read once at interruption, never on a per-frame loop. Copy before canceling the effect.
+    const current = preserve ? snapshot(previous.target.keys()) : undefined;
+    active = undefined;
+    if (current) write(current);
+    previous.animation.cancel();
+    previous.settle({ status: 'cancelled', backend: 'waapi' });
+  };
+  const restoreOmitted = (target: Declarations) => {
+    for (const [property, original] of originals)
+      if (!target.has(property)) {
+        if (original.value) element.style.setProperty(property, original.value, original.priority);
+        else element.style.removeProperty(property);
+        originals.delete(property);
+      }
+  };
+  const instant = (target: Declarations, reason: string): CssPlayback => {
+    write(target);
+    return {
+      backend: 'instant',
+      finished: Promise.resolve({ status: 'finished', backend: 'instant', reason }),
+      cancel() {},
+    };
+  };
+  const animator: CssAnimator = {
+    set(input) {
+      live();
+      const target = normalize(element, input);
+      cancel(false);
+      restoreOmitted(target);
+      acquire(target);
+      write(target);
+    },
+    animate(input, options = {}) {
+      live();
+      const target = normalize(element, input);
+      const duration = options.duration ?? 200;
+      const delay = options.delay ?? 0;
+      const easing = options.easing ?? 'cubic-bezier(0.16, 1, 0.3, 1)';
+      if (!Number.isFinite(duration) || duration < 0 || !Number.isFinite(delay) || delay < 0)
+        throw new Error('CSS duration and delay must be finite nonnegative milliseconds');
+      const probe = element.ownerDocument.createElement('div').style;
+      probe.animationTimingFunction = easing;
+      if (
+        !probe.animationTimingFunction ||
+        /\b(var|inherit|initial|unset|revert)\b/.test(easing) ||
+        easing.includes(';')
+      )
+        throw new Error('Expected a resolved CSS easing, not a token or CSS variable');
+      // Validate the new request before disturbing a good animation.
+      const from = snapshot(target.keys());
+      cancel(true);
+      restoreOmitted(target);
+      acquire(target);
+      if (options.reducedMotion || duration === 0 || target.size === 0)
+        return instant(target, options.reducedMotion ? 'reduced-motion' : 'immediate');
+      if (typeof element.animate !== 'function')
+        return instant(target, 'Web Animations unavailable');
+      const keyframe = (values: Declarations) =>
+        Object.fromEntries([...values].map(([key, value]) => [frameName(key), value])) as Keyframe;
+      let animation: Animation;
+      try {
+        animation = element.animate([keyframe(from), keyframe(target)], {
+          duration,
+          delay,
+          easing,
+          fill: 'both',
+        });
+      } catch {
+        return instant(target, 'Browser rejected this animation; final CSS applied');
+      }
+      let settle!: (value: CssPlaybackResult) => void;
+      const finished = new Promise<CssPlaybackResult>((resolve) => {
+        settle = resolve;
+      });
+      const record = { animation, target, settle };
+      active = record;
+      // Both branches are handled: Animation.finished rejects on cancellation.
+      void animation.finished.then(
+        () => {
+          if (active !== record || disposed) return;
+          write(target);
+          active = undefined;
+          animation.cancel();
+          settle({ status: 'finished', backend: 'waapi' });
+        },
+        () => {
+          if (active !== record || disposed) return;
+          active = undefined;
+          // External cancellation must not leave presence/interaction completion waiting forever.
+          write(target);
+          settle({
+            status: 'finished',
+            backend: 'instant',
+            reason: 'Native animation cancelled externally; final CSS applied',
+          });
+        },
+      );
+      return {
+        backend: 'waapi',
+        finished,
+        cancel() {
+          if (active === record) cancel(true);
+        },
+      };
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      cancel(false);
+      restoreOmitted(new Map());
+      owners.delete(element);
+    },
+  };
+  owners.set(element, animator);
+  return animator;
+}

@@ -22,6 +22,10 @@ Nested timelines must not independently own transports or form cycles.
 
 ## Change map
 
+UI transitions also have an explicit browser-owned CSS path; they do not enter
+the Transport graph above. See [CSS-native UI motion](CSS-UI-MOTION.md) for the
+CSS / JavaScript / Rust boundary, lifecycle and current limits.
+
 | Concern | Source | Focused tests |
 | --- | --- | --- |
 | Tween and observable values | `src/core.ts` | `tests/core/tween.test.ts`, `motion-value.test.ts` |
@@ -34,6 +38,7 @@ Nested timelines must not independently own transports or form cycles.
 | JSON and scene state | `src/sheet.ts` | `sheet.test.ts`, `advanced-cue-sheet.test.ts` |
 | Deterministic export | `src/offline.ts` | `offline.test.ts` |
 | React ownership and hooks | `src/react.tsx` | `tests/react/transport.test.tsx`, `bindings.test.tsx` |
+| CSS-native UI motion and shared config | `src/css.ts`, `src/react-css.tsx`, `src/react-config.tsx` | `tests/react/css-motion.test.tsx`, `docs/scripts/verify-css-ui.mjs` |
 | Gesture lifecycle and controls | `src/gesture/` | `tests/react/gesture.test.tsx`, `gesture-react.test.tsx` |
 | Velocity | `src/gesture/velocity.ts` | `tests/core/velocity-estimator.test.ts` |
 | Renderer/device adapters | `src/three.ts`, `audio.ts`, `midi.ts`, `outputs.ts` | `three.test.ts`, `audio.test.ts`, `midi.test.ts`, `transport.test.ts` |

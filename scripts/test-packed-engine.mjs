@@ -86,6 +86,9 @@ async function nodeConsumer(mode, load, resolveExport) {
     const core = await load('@dhaakon/motion');
     const compiled = await load('@dhaakon/motion/compiled');
     const adapter = await load('@dhaakon/motion/react');
+    const css = await load('@dhaakon/motion/css');
+    assert.equal(typeof css.createCssAnimator, 'function');
+    assert.equal(css.createCssMotionTokens({ duration: '200ms', durationFast: '120ms', durationSlow: '360ms', ease: 'linear' }).feedback.duration, 200);
     const reactModule = await load('react');
     const React = reactModule.default ?? reactModule;
     const ReactDOMServer = await load('react-dom/server');
@@ -96,6 +99,10 @@ async function nodeConsumer(mode, load, resolveExport) {
     }
     const html = ReactDOMServer.renderToString(React.createElement(adapter.MotionConfig, { reducedMotion: 'always' }, React.createElement(Probe)));
     assert.equal(html, '<span>7</span>');
+    const cssHtml = ReactDOMServer.renderToString(React.createElement(adapter.MotionConfig, { reducedMotion: 'always' },
+      React.createElement(adapter.cssMotion.div, { initial: { opacity: 0 }, animate: { opacity: 1 }, 'data-css': 'ssr' }, 'CSS surface')));
+    assert(cssHtml.includes('opacity:1'));
+    assert(cssHtml.includes('CSS surface'));
     assert.equal(fetches, 0);
     assert.equal(implicitWasmCalls, 0);
     assert.equal(core.scheduler.size, 0);
@@ -121,7 +128,7 @@ async function nodeConsumer(mode, load, resolveExport) {
     assert.equal(js.get('x'), 25);
 
     const assets = [
-      '@dhaakon/motion', '@dhaakon/motion/compiled', '@dhaakon/motion/react',
+      '@dhaakon/motion', '@dhaakon/motion/compiled', '@dhaakon/motion/react', '@dhaakon/motion/css',
       '@dhaakon/motion/wasm/node/motion_wasm.js', '@dhaakon/motion/wasm/node/motion_wasm_bg.wasm',
       '@dhaakon/motion/wasm/web/motion_wasm.js', '@dhaakon/motion/wasm/web/motion_wasm_bg.wasm',
       '@dhaakon/motion/wasm/web/motion_wasm.d.ts', '@dhaakon/motion/wasm/manifest.json',

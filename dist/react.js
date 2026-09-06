@@ -1,5 +1,5 @@
 // src/react.tsx
-import React, { createContext, forwardRef, useContext, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import React2, { createContext as createContext3, forwardRef as forwardRef2, useContext as useContext3, useEffect as useEffect2, useId, useImperativeHandle, useLayoutEffect as useLayoutEffect2, useMemo as useMemo3, useRef as useRef2, useState, useSyncExternalStore as useSyncExternalStore2 } from "react";
 import {
   MotionValue,
   Timeline,
@@ -23,15 +23,30 @@ import {
   tapRecognizer,
   transformGesture
 } from "@dhaakon/motion/gesture";
-import { Fragment, jsx } from "react/jsx-runtime";
+
+// src/react-config.tsx
+import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
+import { jsx } from "react/jsx-runtime";
 var MotionContext = createContext({ reducedMotion: "user" });
 function MotionConfig({ children, ...value }) {
   const parent = useContext(MotionContext);
-  return /* @__PURE__ */ jsx(MotionContext.Provider, { value: useMemo(() => ({ ...parent, ...value, transition: { ...parent.transition, ...value.transition } }), [parent, value.transition, value.reducedMotion, value.frameRate]), children });
+  return /* @__PURE__ */ jsx(
+    MotionContext.Provider,
+    {
+      value: useMemo(
+        () => ({ ...parent, ...value, transition: { ...parent.transition, ...value.transition } }),
+        [parent, value.transition, value.reducedMotion, value.frameRate]
+      ),
+      children
+    }
+  );
 }
 function useReducedMotion() {
   const setting = useContext(MotionContext).reducedMotion;
-  const query = useMemo(() => typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null, []);
+  const query = useMemo(
+    () => typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null,
+    []
+  );
   const system = useSyncExternalStore(
     (listener) => {
       query?.addEventListener("change", listener);
@@ -42,11 +57,136 @@ function useReducedMotion() {
   );
   return setting === "always" || setting !== "never" && system;
 }
+
+// src/react-css.tsx
+import React, {
+  createContext as createContext2,
+  forwardRef,
+  useContext as useContext2,
+  useEffect,
+  useLayoutEffect,
+  useMemo as useMemo2,
+  useRef
+} from "react";
+import {
+  createCssAnimator,
+  defaultCssMotionTokens
+} from "@dhaakon/motion/css";
+import { jsx as jsx2 } from "react/jsx-runtime";
+var CssContext = createContext2(defaultCssMotionTokens);
+function CssMotionConfig({
+  tokens,
+  children
+}) {
+  const parent = useContext2(CssContext);
+  const value = useMemo2(() => ({ ...parent, ...tokens }), [parent, tokens]);
+  return /* @__PURE__ */ jsx2(CssContext.Provider, { value, children });
+}
+var useOwnedLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+function resolveVariant(value, variants) {
+  if (typeof value !== "string") return value;
+  if (!variants || !Object.hasOwn(variants, value))
+    throw new Error(`Unknown CSS variant: ${value}`);
+  return variants[value];
+}
+function createCssMotionComponent(tag) {
+  const Component = forwardRef(
+    function CssMotionElement(rawProps, forwardedRef) {
+      const {
+        initial,
+        animate,
+        variants,
+        transition,
+        onMotionStart,
+        onMotionComplete,
+        style,
+        ...props
+      } = rawProps;
+      const tokens = useContext2(CssContext);
+      const reduced = useReducedMotion();
+      const target = resolveVariant(animate, variants);
+      const timing = typeof transition === "string" ? Object.hasOwn(tokens, transition) ? tokens[transition] : (() => {
+        throw new Error(`Unknown CSS motion token: ${transition}`);
+      })() : transition ?? tokens.feedback;
+      const first = useRef({
+        value: !reduced && initial ? { ...resolveVariant(initial, variants) } : { ...target },
+        shouldAnimate: initial !== void 0 && initial !== false
+      });
+      const node = useRef(null);
+      const owner = useRef(null);
+      const fresh = useRef(true);
+      const callbacks = useRef({ onMotionStart, onMotionComplete });
+      callbacks.current = { onMotionStart, onMotionComplete };
+      const targetKey = JSON.stringify(target);
+      useOwnedLayoutEffect(() => {
+        if (!node.current) return;
+        const animator = createCssAnimator(node.current);
+        owner.current = animator;
+        fresh.current = true;
+        try {
+          animator.set(first.current.value);
+        } catch (error) {
+          owner.current = null;
+          animator.dispose();
+          throw error;
+        }
+        return () => {
+          owner.current = null;
+          animator.dispose();
+        };
+      }, []);
+      useOwnedLayoutEffect(() => {
+        const animator = owner.current;
+        if (!animator) return;
+        let valid = true;
+        const skipEntry = fresh.current && !first.current.shouldAnimate;
+        fresh.current = false;
+        const playback = animator.animate(target, {
+          ...timing,
+          duration: skipEntry ? 0 : timing.duration,
+          reducedMotion: reduced
+        });
+        callbacks.current.onMotionStart?.(playback);
+        void playback.finished.then((result) => {
+          if (valid && result.status === "finished") callbacks.current.onMotionComplete?.(result);
+        });
+        return () => {
+          valid = false;
+        };
+      }, [targetKey, timing.duration, timing.delay, timing.easing, reduced]);
+      const ref = useMemo2(
+        () => (element) => {
+          node.current = element;
+          if (typeof forwardedRef === "function") forwardedRef(element);
+          else if (forwardedRef) forwardedRef.current = element;
+        },
+        [forwardedRef]
+      );
+      return React.createElement(tag, {
+        ...props,
+        ref,
+        style: { ...style, ...first.current.value }
+      });
+    }
+  );
+  Component.displayName = `CssMotion(${typeof tag === "string" ? tag : "Component"})`;
+  return Component;
+}
+var cssMotion = {
+  div: createCssMotionComponent("div"),
+  section: createCssMotionComponent("section"),
+  article: createCssMotionComponent("article"),
+  span: createCssMotionComponent("span"),
+  button: createCssMotionComponent("button")
+};
+
+// src/react.tsx
+import { Fragment, jsx as jsx3 } from "react/jsx-runtime";
 function useInView({ once = true, amount = "some", margin = "0px", disabled = false } = {}) {
-  const ref = useRef(null);
+  const ref = useRef2(null);
   const reduced = useReducedMotion();
   const [inView, setInView] = useState(disabled || reduced);
-  useEffect(() => {
+  useEffect2(() => {
     if (disabled || reduced || typeof IntersectionObserver === "undefined") {
       setInView(true);
       return;
@@ -65,23 +205,23 @@ function useInView({ once = true, amount = "some", margin = "0px", disabled = fa
   return [ref, inView];
 }
 function useMotionValue(initial) {
-  const ref = useRef(null);
+  const ref = useRef2(null);
   if (!ref.current) ref.current = new MotionValue(initial);
-  useEffect(() => () => ref.current?.stop(), []);
+  useEffect2(() => () => ref.current?.stop(), []);
   return ref.current;
 }
 function useMotionValueState(value) {
-  return useSyncExternalStore(value.subscribe, () => value.get(), () => value.get());
+  return useSyncExternalStore2(value.subscribe, () => value.get(), () => value.get());
 }
 function useTween(from, to, options = {}) {
   const motionValue = useMotionValue(from);
-  const tween = useRef(null);
+  const tween = useRef2(null);
   const reduced = useReducedMotion();
-  const config = useContext(MotionContext);
+  const config = useContext3(MotionContext);
   const transition = config.transition;
   const fromKey = stableKey(from);
   const toKey = stableKey(to);
-  useEffect(() => {
+  useEffect2(() => {
     motionValue.set(from);
     tween.current = motionValue.animate(to, { frameRate: config.frameRate, ...transition, ...options, duration: reduced ? 0 : options.duration ?? transition?.duration });
     return () => {
@@ -91,8 +231,8 @@ function useTween(from, to, options = {}) {
   return { value: useMotionValueState(motionValue), motionValue, controls: tween };
 }
 function useTimeline(factory, dependencies = []) {
-  const timeline = useRef(null);
-  useEffect(() => {
+  const timeline = useRef2(null);
+  useEffect2(() => {
     timeline.current = factory();
     return () => {
       timeline.current?.stop();
@@ -103,10 +243,10 @@ function useTimeline(factory, dependencies = []) {
 }
 function Motion({ from, to, children, ...options }) {
   const result = useTween(from, to, options);
-  return /* @__PURE__ */ jsx(Fragment, { children: children(result.value, result.controls) });
+  return /* @__PURE__ */ jsx3(Fragment, { children: children(result.value, result.controls) });
 }
 function createMotionComponent(tag) {
-  const Component = forwardRef(function DhaakonMotionElement(rawProps, forwardedRef) {
+  const Component = forwardRef2(function DhaakonMotionElement(rawProps, forwardedRef) {
     const {
       as,
       initial,
@@ -142,28 +282,28 @@ function createMotionComponent(tag) {
       onMotionComplete,
       ...props
     } = rawProps;
-    const localRef = useRef(null);
-    const config = useContext(MotionContext);
+    const localRef = useRef2(null);
+    const config = useContext3(MotionContext);
     const reduced = useReducedMotion();
-    const gestureHandlers = useRef({ onTap, onLongPress, onPanStart, onPan, onPanEnd, onPinch, onDragStart, onDrag, onDragEnd });
+    const gestureHandlers = useRef2({ onTap, onLongPress, onPanStart, onPan, onPanEnd, onPinch, onDragStart, onDrag, onDragEnd });
     gestureHandlers.current = { onTap, onLongPress, onPanStart, onPan, onPanEnd, onPinch, onDragStart, onDrag, onDragEnd };
-    const dragBoundsRef = useRef(dragBounds);
+    const dragBoundsRef = useRef2(dragBounds);
     dragBoundsRef.current = dragBounds;
     const [inViewRef, inView] = useInView({ ...viewport, disabled: !whileInView });
-    const hasAnimated = useRef(false);
-    const visual = useRef({});
-    const interactionTween = useRef(null);
+    const hasAnimated = useRef2(false);
+    const visual = useRef2({});
+    const interactionTween = useRef2(null);
     useImperativeHandle(forwardedRef, () => localRef.current);
     const initialKey = stableKey(initial);
     const targetKey = stableKey(target);
     const viewKey = stableKey(whileInView);
-    useLayoutEffect(() => {
+    useLayoutEffect2(() => {
       if (localRef.current && initial) {
         visual.current = { ...initial };
         writeStyle(localRef.current, initial);
       }
     }, [initialKey]);
-    useEffect(() => {
+    useEffect2(() => {
       const node = localRef.current;
       const activeTarget = whileInView ? inView ? whileInView : initial || void 0 : target;
       if (!node || !activeTarget) return;
@@ -198,7 +338,7 @@ function createMotionComponent(tag) {
     const focusKey = stableKey(whileFocus);
     const boundsKey = typeof dragBounds === "function" ? "function" : stableKey(dragBounds);
     const snapKey = stableKey(dragSnap);
-    useEffect(() => {
+    useEffect2(() => {
       const node = localRef.current;
       if (!node) return;
       let liveDragValues;
@@ -324,7 +464,7 @@ function createMotionComponent(tag) {
         disposers.forEach((dispose) => dispose());
       };
     }, [hoverKey, tapKey, dragKey, focusKey, boundsKey, snapKey, Boolean(drag), dragAxis, dragElastic, dragMomentum, dragPropagation, dragListener, dragKeyboard, Boolean(onTap), Boolean(onLongPress), Boolean(onPanStart || onPan || onPanEnd), Boolean(onPinch), dragControls, reduced]);
-    return React.createElement(as || tag, { ...props, style, ref: (node) => {
+    return React2.createElement(as || tag, { ...props, style, ref: (node) => {
       localRef.current = node;
       inViewRef.current = node;
     } });
@@ -345,16 +485,16 @@ var motion = new Proxy({}, { get: (_, tag) => {
 } });
 function useGesture(ref, recognizers) {
   const key = recognizers.map((recognizer) => recognizer.kind).join("|");
-  useEffect(() => {
+  useEffect2(() => {
     if (!ref.current) return;
     const arena = new GestureArena(ref.current, recognizers);
     return () => arena.dispose();
   }, [ref, key]);
 }
 function useDrag(ref, target, options = {}) {
-  const controls = useRef(null);
+  const controls = useRef2(null);
   const key = stableKey(options);
-  useEffect(() => {
+  useEffect2(() => {
     if (!ref.current) return;
     controls.current = bindDrag(target, ref.current, options);
     return () => {
@@ -366,25 +506,25 @@ function useDrag(ref, target, options = {}) {
 }
 function usePinch(ref, options) {
   const key = stableKey(options);
-  useEffect(() => {
+  useEffect2(() => {
     if (!ref.current) return;
     const binding = transformGesture(ref.current, options);
     return binding.dispose;
   }, [ref, key]);
 }
 function useScrub(ref, transport, options = {}) {
-  const inherited = useContext(TransportContext);
+  const inherited = useContext3(TransportContext);
   const active = transport ?? inherited;
   const key = stableKey(options);
-  useEffect(() => {
+  useEffect2(() => {
     if (!ref.current || !active) return;
     const binding = bindScrub(active, ref.current, options);
     return binding.dispose;
   }, [ref, active, key]);
 }
 function useDragControls() {
-  const active = useRef(null);
-  return useMemo(() => ({ start: (event) => active.current?.start(event), cancel: () => active.current?.cancel(), _bind: (control) => {
+  const active = useRef2(null);
+  return useMemo3(() => ({ start: (event) => active.current?.start(event), cancel: () => active.current?.cancel(), _bind: (control) => {
     active.current = control;
   }, _unbind: (control) => {
     if (active.current === control) active.current = null;
@@ -392,12 +532,12 @@ function useDragControls() {
 }
 function useVelocity(value) {
   const output = useMotionValue(value.velocity);
-  useEffect(() => value.subscribe(() => output.set(value.velocity)), [value, output]);
+  useEffect2(() => value.subscribe(() => output.set(value.velocity)), [value, output]);
   return output;
 }
 function useIsPressed(ref) {
   const state = useMotionValue(false);
-  useEffect(() => {
+  useEffect2(() => {
     if (!ref.current) return;
     const binding = bindPress(ref.current, { onChange: (value) => state.set(value) });
     return binding.dispose;
@@ -406,7 +546,7 @@ function useIsPressed(ref) {
 }
 function useIsHovered(ref) {
   const state = useMotionValue(false);
-  useEffect(() => {
+  useEffect2(() => {
     if (!ref.current) return;
     const binding = bindHover(ref.current, { onChange: (value) => state.set(value) });
     return binding.dispose;
@@ -414,12 +554,12 @@ function useIsHovered(ref) {
   return useMotionValueState(state);
 }
 function Reveal({ from = { y: 28, opacity: 0 }, to = { y: 0, opacity: 1 }, once = true, amount = "some", margin = "0px 0px -8% 0px", ...props }) {
-  return /* @__PURE__ */ jsx(motion.div, { ...props, initial: from, whileInView: to, viewport: { once, amount, margin } });
+  return /* @__PURE__ */ jsx3(motion.div, { ...props, initial: from, whileInView: to, viewport: { once, amount, margin } });
 }
-var SequenceContext = createContext(null);
-var TransportContext = createContext(null);
+var SequenceContext = createContext3(null);
+var TransportContext = createContext3(null);
 function requireSequence(componentName) {
-  const value = useContext(SequenceContext);
+  const value = useContext3(SequenceContext);
   if (!value) throw new Error(`<${componentName}> (or use${componentName}()) must be used inside <Transport>, directly or nested inside a <Sequence>.`);
   return value;
 }
@@ -484,10 +624,10 @@ function createSequenceValue(timeline, onRebuilt) {
 function Transport(props) {
   const reduced = useReducedMotion();
   const respect = props.respectReducedMotion !== false;
-  const ownsInstance = useRef(false);
-  const loopRef = useRef(props.loop);
+  const ownsInstance = useRef2(false);
+  const loopRef = useRef2(props.loop);
   loopRef.current = props.loop;
-  const instanceRef = useRef(null);
+  const instanceRef = useRef2(null);
   if (!instanceRef.current) {
     if (props.transport) {
       instanceRef.current = props.transport;
@@ -498,21 +638,21 @@ function Transport(props) {
     }
   }
   const transport = instanceRef.current;
-  useEffect(() => () => {
+  useEffect2(() => () => {
     if (ownsInstance.current) transport.dispose();
   }, [transport]);
-  useEffect(() => {
+  useEffect2(() => {
     const detachers = (props.outputs ?? []).map((output) => transport.attach(output));
     return () => {
       detachers.forEach((detach) => detach());
     };
   }, [transport, stableKey(props.outputs?.map((o) => o.name))]);
-  const onStateChangeRef = useRef(props.onStateChange);
+  const onStateChangeRef = useRef2(props.onStateChange);
   onStateChangeRef.current = props.onStateChange;
-  useEffect(() => transport.attach({ onStateChange: (state) => onStateChangeRef.current?.(state) }), [transport]);
-  const onFinishRef = useRef(props.onFinish);
+  useEffect2(() => transport.attach({ onStateChange: (state) => onStateChangeRef.current?.(state) }), [transport]);
+  const onFinishRef = useRef2(props.onFinish);
   onFinishRef.current = props.onFinish;
-  useEffect(() => {
+  useEffect2(() => {
     let cancelled = false;
     transport.finished.then(() => {
       if (!cancelled) onFinishRef.current?.();
@@ -523,7 +663,7 @@ function Transport(props) {
   }, [transport, transport.state]);
   const controlled = props.paused !== void 0;
   const shouldRun = (props.autoplay || controlled) && props.paused !== true && !(respect && reduced);
-  useEffect(() => {
+  useEffect2(() => {
     if (!props.autoplay && !controlled) return;
     if (respect && reduced) {
       transport.seek(transport.duration);
@@ -536,23 +676,23 @@ function Transport(props) {
       transport.pause();
     }
   }, [transport, shouldRun, respect, reduced]);
-  const sequenceValue = useMemo(
+  const sequenceValue = useMemo3(
     () => createSequenceValue(transport.root, () => {
       if (ownsInstance.current) transport.setLoop(loopRef.current);
       transport.seek(transport.time, { cues: "skip" });
     }),
     [transport]
   );
-  return /* @__PURE__ */ jsx(TransportContext.Provider, { value: transport, children: /* @__PURE__ */ jsx(SequenceContext.Provider, { value: sequenceValue, children: props.children }) });
+  return /* @__PURE__ */ jsx3(TransportContext.Provider, { value: transport, children: /* @__PURE__ */ jsx3(SequenceContext.Provider, { value: sequenceValue, children: props.children }) });
 }
 function useTransport() {
-  const transport = useContext(TransportContext);
+  const transport = useContext3(TransportContext);
   if (!transport) throw new Error("useTransport() must be called inside <Transport>.");
   return transport;
 }
 function useTransportState() {
   const transport = useTransport();
-  const snapshotRef = useRef({ state: transport.state, rate: transport.rate, duration: transport.duration, frameRate: transport.frameRate });
+  const snapshotRef = useRef2({ state: transport.state, rate: transport.rate, duration: transport.duration, frameRate: transport.frameRate });
   const getSnapshot = () => {
     const prev = snapshotRef.current;
     if (prev.state !== transport.state || prev.rate !== transport.rate || prev.duration !== transport.duration || prev.frameRate !== transport.frameRate) {
@@ -560,7 +700,7 @@ function useTransportState() {
     }
     return snapshotRef.current;
   };
-  return useSyncExternalStore(
+  return useSyncExternalStore2(
     (listener) => transport.attach({ onStateChange: () => listener(), onRateChange: () => listener() }),
     getSnapshot,
     getSnapshot
@@ -570,7 +710,7 @@ function usePlayhead(options = {}) {
   const transport = useTransport();
   const fps = Math.max(1, options.fps ?? 30);
   const [snapshot, setSnapshot] = useState(() => ({ time: transport.time, frame: transport.frame, timecode: transport.timecode, progress: transport.progress }));
-  useEffect(() => {
+  useEffect2(() => {
     const minInterval = 1e3 / fps;
     let last = 0;
     let trailing;
@@ -599,16 +739,16 @@ function usePlayhead(options = {}) {
 function usePlayheadValue() {
   const transport = useTransport();
   const motionValue = useMotionValue(transport.time);
-  useEffect(() => transport.subscribe((info) => motionValue.set(info.time)), [transport, motionValue]);
+  useEffect2(() => transport.subscribe((info) => motionValue.set(info.time)), [transport, motionValue]);
   return motionValue;
 }
 function useCue(at, handler, deps = []) {
   const parent = requireSequence("Cue");
   const id = useId();
-  const handlerRef = useRef(handler);
+  const handlerRef = useRef2(handler);
   handlerRef.current = handler;
-  const stableHandler = useRef((e) => handlerRef.current(e)).current;
-  useLayoutEffect(() => {
+  const stableHandler = useRef2((e) => handlerRef.current(e)).current;
+  useLayoutEffect2(() => {
     parent.registerCue(id, { name: id, at, handler: stableHandler });
     return () => parent.unregisterCue(id);
   }, [parent, id, stableKey(at), ...deps]);
@@ -617,12 +757,12 @@ function Track({ target, keyframes, at, ...options }) {
   const parent = requireSequence("Track");
   const id = useId();
   const key = `${stableKey(keyframes)}:${stableKey(options)}`;
-  const built = useRef(null);
+  const built = useRef2(null);
   if (!built.current || built.current.key !== key) {
     const item = target instanceof MotionValue ? new CoreTrack({ ...options, keyframes, target }) : new CoreTrack({ ...options, keyframes, apply: target });
     built.current = { item, key };
   }
-  useLayoutEffect(() => {
+  useLayoutEffect2(() => {
     parent.register(id, built.current.item, at);
     return () => parent.unregister(id);
   }, [parent, id, stableKey(at), key]);
@@ -632,12 +772,12 @@ function Tween({ target, from, to, at, ...options }) {
   const parent = requireSequence("Tween");
   const id = useId();
   const key = `${stableKey(from)}:${stableKey(to)}:${stableKey(options)}`;
-  const built = useRef(null);
+  const built = useRef2(null);
   if (!built.current || built.current.key !== key) {
     const write = target instanceof MotionValue ? (value) => target.set(value) : target;
     built.current = { item: new CoreTween({ ...options, from, to, onUpdate: (value) => write(value) }), key };
   }
-  useLayoutEffect(() => {
+  useLayoutEffect2(() => {
     parent.register(id, built.current.item, at);
     return () => parent.unregister(id);
   }, [parent, id, stableKey(at), key]);
@@ -646,7 +786,7 @@ function Tween({ target, from, to, at, ...options }) {
 function Marker({ name, at, color, payload }) {
   const parent = requireSequence("Marker");
   const id = useId();
-  useLayoutEffect(() => {
+  useLayoutEffect2(() => {
     parent.registerMarker(id, { name, at, options: { color, payload } });
     return () => parent.unregisterMarker(id);
   }, [parent, id, name, stableKey(at), color, stableKey(payload)]);
@@ -655,10 +795,10 @@ function Marker({ name, at, color, payload }) {
 function Cue({ name, at, onFire, payload, once }) {
   const parent = requireSequence("Cue");
   const id = useId();
-  const handlerRef = useRef(onFire);
+  const handlerRef = useRef2(onFire);
   handlerRef.current = onFire;
-  const stableHandler = useRef((e) => handlerRef.current(e)).current;
-  useLayoutEffect(() => {
+  const stableHandler = useRef2((e) => handlerRef.current(e)).current;
+  useLayoutEffect2(() => {
     parent.registerCue(id, { name, at, handler: stableHandler, options: { payload, once } });
     return () => parent.unregisterCue(id);
   }, [parent, id, name, stableKey(at), stableKey(payload), once]);
@@ -667,13 +807,13 @@ function Cue({ name, at, onFire, payload, once }) {
 function Region({ name, from, to, onEnter, onExit, payload, once }) {
   const parent = requireSequence("Region");
   const id = useId();
-  const enterRef = useRef(onEnter);
+  const enterRef = useRef2(onEnter);
   enterRef.current = onEnter;
-  const exitRef = useRef(onExit);
+  const exitRef = useRef2(onExit);
   exitRef.current = onExit;
-  const stableEnter = useRef((e) => enterRef.current?.(e)).current;
-  const stableExit = useRef((e) => exitRef.current?.(e)).current;
-  useLayoutEffect(() => {
+  const stableEnter = useRef2((e) => enterRef.current?.(e)).current;
+  const stableExit = useRef2((e) => exitRef.current?.(e)).current;
+  useLayoutEffect2(() => {
     parent.registerRegion(id, { name, from, to, options: { payload, once, onEnter: stableEnter, onExit: stableExit } });
     return () => parent.unregisterRegion(id);
   }, [parent, id, name, stableKey(from), stableKey(to), stableKey(payload), once]);
@@ -682,20 +822,20 @@ function Region({ name, from, to, onEnter, onExit, payload, once }) {
 function Sequence({ name, at, repeat, repeatDelay, yoyo, frameRate, snap, onComplete, children }) {
   const parent = requireSequence("Sequence");
   const id = useId();
-  const timelineRef = useRef(null);
+  const timelineRef = useRef2(null);
   if (!timelineRef.current) timelineRef.current = new Timeline({ name, repeat, repeatDelay, yoyo, frameRate, snap, onComplete });
   const timeline = timelineRef.current;
-  const valueRef = useRef(null);
+  const valueRef = useRef2(null);
   if (!valueRef.current) valueRef.current = createSequenceValue(timeline, () => parent.invalidate());
-  useLayoutEffect(() => {
+  useLayoutEffect2(() => {
     parent.register(id, timeline, at);
     return () => parent.unregister(id);
   }, [parent, id, stableKey(at)]);
-  return /* @__PURE__ */ jsx(SequenceContext.Provider, { value: valueRef.current, children });
+  return /* @__PURE__ */ jsx3(SequenceContext.Provider, { value: valueRef.current, children });
 }
 function useSceneState(targets) {
   const [state, setState] = useState(() => captureScene(targets));
-  const targetsRef = useRef(targets);
+  const targetsRef = useRef2(targets);
   targetsRef.current = targets;
   const set = (next, transition) => {
     applyScene(next, targetsRef.current, transition ? { transition } : void 0);
@@ -704,6 +844,7 @@ function useSceneState(targets) {
   return [state, set];
 }
 export {
+  CssMotionConfig,
   Cue,
   Marker,
   Motion,
@@ -714,7 +855,9 @@ export {
   Track,
   Transport,
   Tween,
+  createCssMotionComponent,
   createMotionComponent,
+  cssMotion,
   motion,
   useCue,
   useDrag,
