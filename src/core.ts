@@ -43,6 +43,7 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
   onBegin?: TweenOptions<T>['onBegin']; onStart?: TweenOptions<T>['onStart']; onUpdate?: TweenOptions<T>['onUpdate'];
   onEnd?: TweenOptions<T>['onEnd']; onComplete?: TweenOptions<T>['onComplete'];
   value: T = this.from; progress = 0; elapsed = 0;
+  private sampledTime = 0;
   private durationInput: TimeInput = 300;
   private delayInput: TimeInput = 0;
   private repeatDelayInput: TimeInput = 0;
@@ -95,8 +96,8 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
   reverse() {
     const active = Math.max(0, this.elapsed - this.delay); this.isReversed = !this.isReversed;
     if (this.repeat === Infinity) {
-      const cycleDuration = Math.max(1, this.duration + this.repeatDelay);
-      const iteration = Math.floor(active / cycleDuration);
+      const cycleDuration = this.duration + this.repeatDelay;
+      const iteration = cycleDuration > 0 ? Math.floor(active / cycleDuration) : 0;
       const cycleTime = Math.min(this.duration, Math.max(0, active - iteration * cycleDuration));
       this.elapsed = this.delay + iteration * cycleDuration + Math.max(0, this.duration - cycleTime);
     } else this.elapsed = this.delay + Math.max(0, this.activeDuration - active);
@@ -130,15 +131,23 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
   /** The SMPTE timecode for the tween's active time, at `rate`. */
   timecodeAt(rate: FrameRateInput): Timecode { return msToTimecode(Math.max(0, this.elapsed - this.delay), frameRate(rate)); }
   getCurrentFrame(fps = 60) { return this.frameAt(fps); }
-  /** Analytic/numerically differentiated velocity of the current tween value, in units per millisecond. */
+  /** Derivative for increasing sampled local time, in units/ms; stationary phases return zero. */
   instantaneousVelocity(): T | number {
-    if (this.duration <= 0) return 0;
+    if (!(this.duration > 0) || !Number.isFinite(this.duration) || this.sampledTime < this.delay || this.sampledTime >= this.totalDuration) return 0;
+    const { active, iteration } = sampleCycle(
+      { duration: this.duration, delay: this.delay, repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction, reversed: this.isReversed },
+      this.sampledTime,
+    );
+    if (active - iteration * (this.duration + this.repeatDelay) >= this.duration) return 0;
+    const alternating = this.direction === 'alternate' || this.direction === 'alternate-reverse';
+    const startsReverse = this.direction === 'reverse' || this.direction === 'alternate-reverse';
+    const reversed = startsReverse !== (alternating && iteration % 2 === 1) !== this.isReversed;
     const epsilon = 1e-4;
     const before = this.easing(Math.max(0, this.progress - epsilon));
     const after = this.easing(Math.min(1, this.progress + epsilon));
     const span = Math.min(1, this.progress + epsilon) - Math.max(0, this.progress - epsilon);
     const slope = span > 0 ? (after - before) / span : 0;
-    return scaleVelocity(velocityBetween(this.from, this.toValue, this.duration), slope) as T | number;
+    return scaleVelocity(velocityBetween(this.from, this.toValue, this.duration), reversed ? -slope : slope) as T | number;
   }
   /**
    * A two-keyframe `Track` equivalent to this tween's `from`/`to`/`duration`/`easing`/`repeat`/`repeatDelay`/`direction`.
@@ -156,6 +165,7 @@ export class Tween<T extends MotionValueShape = number> implements TimelineItem 
   get totalDuration() { return this.delay + this.activeDuration; }
 
   sampleAt(milliseconds: number, _ctx?: RenderContext) {
+    this.sampledTime = milliseconds;
     const { progress } = sampleCycle(
       { duration: this.duration, delay: this.delay, repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction, reversed: this.isReversed },
       milliseconds,

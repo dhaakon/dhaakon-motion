@@ -50,7 +50,8 @@ test('saveSheet(loadSheet(sheet)) round-trips target bindings, easing, and struc
   const timeline = loadSheet(original, { targets: { camera } });
   const saved = saveSheet(timeline);
   expect(saved.name).toBe('minimal');
-  expect(saved.items[0]).toMatchObject({ type: 'tween', target: 'camera', duration: 500, easing: 'dhaakon' });
+  expect(saved.items[0]).toMatchObject({ type: 'tween', target: 'camera', duration: '12f', easing: 'dhaakon' });
+  expect(saveSheet(timeline, { source: 'runtime' }).items[0]).toMatchObject({ duration: 500 });
 });
 
 test('saveSheet(loadSheet(...)) is a fixed point: reloading and re-saving produces the same sheet', () => {

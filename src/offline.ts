@@ -25,8 +25,14 @@ export interface RenderFramesOptions {
 }
 
 function resolveOfflineTransport(source: Transport | Timeline, options: { frameRate?: FrameRateInput }): Transport {
-  if (source instanceof Transport) return source;
-  return new OfflineTransport({ root: source, frameRate: options.frameRate ?? source.frameRate });
+  if (source instanceof Timeline && source.parent) throw new Error('Offline rendering requires a root timeline, not a nested child.');
+  const transport = source instanceof Transport ? source : source.rootTransport ?? new OfflineTransport({ root: source, frameRate: options.frameRate ?? source.frameRate });
+  if (options.frameRate !== undefined) {
+    const rate = frameRate(options.frameRate);
+    if (rate.num !== transport.frameRate.num || rate.den !== transport.frameRate.den || rate.dropFrame !== transport.frameRate.dropFrame)
+      throw new Error('Offline frame rate must match the owning transport frame rate. Create a fresh source to export at another rate.');
+  }
+  return transport;
 }
 
 const warnedOffline = new WeakSet<TransportOutput>();
@@ -46,7 +52,17 @@ function resolveRange(transport: Transport, rate: ReturnType<typeof frameRate>, 
   const from = options.from != null ? parseTime(options.from, rate) : 0;
   const to = options.to != null ? parseTime(options.to, rate) : transport.duration;
   if (!Number.isFinite(to)) throw new Error('renderFrames/frames: the transport has an infinite duration; pass an explicit `to`.');
+  if (!Number.isFinite(from) || from < 0 || to < from || to > transport.duration) throw new Error('renderFrames/frames: range must be finite, non-negative, ordered, and within the transport duration.');
+  if (!Number.isSafeInteger(msToFrame(from, rate)) || !Number.isSafeInteger(msToFrame(to, rate))) throw new Error('renderFrames/frames: range exceeds safe integer frame indices.');
   return { from, to };
+}
+
+const sampledOffline = new WeakSet<Transport>();
+function prepareRange(transport: Transport, from: number, startTime: number) {
+  if (from <= 0 || !sampledOffline.has(transport)) {
+    transport.root.resetBefore(startTime);
+  }
+  sampledOffline.add(transport);
 }
 
 /**
@@ -54,8 +70,12 @@ function resolveRange(transport: Transport, rate: ReturnType<typeof frameRate>, 
  * accumulation-free frame clock, calling `onFrame` once per frame after every
  * value has been written and every attached output has drawn. Deterministic:
  * running it twice, or resuming it on the same transport from where a prior
- * call left off, produces identical output. Resuming is detected by `from > 0`,
- * which skips the reset-and-clear-cue-state a fresh run performs at `from <= 0`.
+ * call left off, produces identical sampled values. First use (including a partial
+ * range), or `from <= 0`, resets cue history and includes the first boundary.
+ * Subsequent `from > 0` calls resume existing crossing/once state. The owning
+ * transport is reused, remains at the final sampled time, and must not be playing.
+ * Playback loop wrapping is suspended during capture (the loop setting survives).
+ * Explicit seeks/graph edits by the caller during capture remain unsupported.
  */
 export async function renderFrames(
   source: Transport | Timeline,
@@ -65,17 +85,16 @@ export async function renderFrames(
   const transport = resolveOfflineTransport(source, options);
   const rate = options.frameRate ? frameRate(options.frameRate) : transport.frameRate;
   const { from, to } = resolveRange(transport, rate, options);
-
-  const detachers = (options.outputs ?? []).map((output) => attachForOffline(transport, output));
+  const release = transport.beginOffline();
+  const detachers: Array<() => void> = [];
   let latest: FrameInfo | undefined;
   const unsubscribe = transport.subscribe((info) => { latest = info; });
 
   try {
-    if (from <= 0) transport.root.reset?.();
-    transport.seek(from, { cues: 'skip' });
-
+    for (const output of options.outputs ?? []) detachers.push(attachForOffline(transport, output));
     const startFrame = msToFrame(from, rate);
     const endFrame = msToFrame(to, rate);
+    prepareRange(transport, from, frameToMs(startFrame, rate));
     let count = 0;
     for (let frame = startFrame; frame <= endFrame; frame += 1) {
       if (options.signal?.aborted) break;
@@ -88,7 +107,14 @@ export async function renderFrames(
     return { frames: count, from, to };
   } finally {
     unsubscribe();
-    for (const detach of detachers) detach();
+    const errors: unknown[] = [];
+    try {
+      for (const detach of detachers) {
+        try { detach(); } catch (error) { errors.push(error); }
+      }
+    } finally { release(); }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, 'Offline output cleanup failed.');
   }
 }
 
@@ -97,19 +123,19 @@ export function* frames(source: Transport | Timeline, options: { frameRate?: Fra
   const transport = resolveOfflineTransport(source, options);
   const rate = options.frameRate ? frameRate(options.frameRate) : transport.frameRate;
   const { from, to } = resolveRange(transport, rate, options);
-
+  const release = transport.beginOffline();
   let latest: FrameInfo | undefined;
   const unsubscribe = transport.subscribe((info) => { latest = info; });
   try {
-    if (from <= 0) transport.root.reset?.();
-    transport.seek(from, { cues: 'skip' });
     const startFrame = msToFrame(from, rate);
     const endFrame = msToFrame(to, rate);
+    prepareRange(transport, from, frameToMs(startFrame, rate));
     for (let frame = startFrame; frame <= endFrame; frame += 1) {
       transport.seek(frameToMs(frame, rate), { cues: 'fire' });
       yield latest as FrameInfo;
     }
   } finally {
     unsubscribe();
+    release();
   }
 }

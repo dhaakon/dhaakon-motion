@@ -25,8 +25,14 @@ export interface InertiaOptions<T = number> {
   timeConstant?: number;
   min?: number;
   max?: number;
+  /** Bounds spring by default; false stops at the first bound without overshoot. */
   bounce?: PhysicsSpringOptions<T> | false;
   restDelta?: number;
+  /**
+   * Changes the exponential amplitude to target - from (and therefore its initial
+   * velocity). A changed, unbounded target gets a continuous two-time-constant
+   * settling tail; unchanged targets retain the legacy exponential cutoff.
+   */
   modifyTarget?(projected: number): number;
   scheduler?: FrameScheduler;
 }
@@ -162,6 +168,9 @@ export class InertiaItem<T extends MotionValueShape = number> extends PhysicsIte
   readonly totalDuration: number; readonly target: T;
   value: T; velocity: T | number;
   private boundary?: number; private crossingTime = 0; private settle?: SpringItem<number>;
+  private retargetedVelocity?: number;
+  private decayTime = 0;
+  private hasRetargetedTail = false;
   constructor(options: InertiaItemOptions<T>) {
     super(options.onUpdate, options.scheduler);
     this.name = options.name; this.from = options.from; this.initialVelocity = options.velocity ?? 0; this.options = options;
@@ -170,33 +179,51 @@ export class InertiaItem<T extends MotionValueShape = number> extends PhysicsIte
     if (typeof this.from === 'number') {
       const projected = projectFling(this.from, numericVelocity(this.initialVelocity) * power, tau);
       const modified = options.modifyTarget?.(projected) ?? projected;
+      if (!Number.isFinite(modified)) throw new Error('Inertia target must be a finite number');
+      if (modified !== projected) this.retargetedVelocity = (modified - this.from) / tau;
       this.target = modified as T;
       const bound = modified < (options.min ?? -Infinity) ? options.min : modified > (options.max ?? Infinity) ? options.max : undefined;
-      if (bound != null && options.bounce !== false) {
+      if (bound != null) {
         this.boundary = bound;
-        const distance = bound - this.from; const full = numericVelocity(this.initialVelocity) * power * tau;
+        this.target = bound as T;
+        const effectiveVelocity = this.retargetedVelocity ?? numericVelocity(this.initialVelocity) * power;
+        const distance = bound - this.from; const full = effectiveVelocity * tau;
         const ratio = full === 0 ? 1 : Math.max(0, Math.min(.999999, distance / full));
         this.crossingTime = Math.max(0, -tau * Math.log(1 - ratio));
-        const crossingVelocity = numericVelocity(this.initialVelocity) * power * Math.exp(-this.crossingTime / tau);
-        this.settle = new SpringItem<number>({ from: bound, to: bound, velocity: crossingVelocity, ...(typeof options.bounce === 'object' ? options.bounce as PhysicsSpringOptions<number> : {}), scheduler: options.scheduler });
+        const crossingVelocity = effectiveVelocity * Math.exp(-this.crossingTime / tau);
+        if (options.bounce !== false) this.settle = new SpringItem<number>({ from: bound, to: bound, velocity: crossingVelocity, ...(typeof options.bounce === 'object' ? options.bounce as PhysicsSpringOptions<number> : {}), scheduler: options.scheduler });
       }
     } else this.target = this.from;
     const rest = Math.max(.00001, options.restDelta ?? .01);
-    const v = Math.abs(numericVelocity(this.initialVelocity) * power);
-    const decayDuration = v <= rest ? 0 : Math.max(0, tau * Math.log(v / rest));
-    this.totalDuration = this.settle ? this.crossingTime + this.settle.totalDuration : decayDuration;
+    const v = Math.abs(this.retargetedVelocity ?? numericVelocity(this.initialVelocity) * power);
+    this.decayTime = v <= rest ? 0 : Math.max(0, tau * Math.log(v / rest));
+    this.hasRetargetedTail = this.retargetedVelocity !== undefined && this.boundary === undefined && v > 0;
+    this.totalDuration = this.settle ? this.crossingTime + this.settle.totalDuration
+      : this.boundary !== undefined ? this.crossingTime
+      : this.decayTime + (this.hasRetargetedTail ? 2 * tau : 0);
     if (options.autoplay) queueMicrotask(() => this.play());
   }
   sampleAt(milliseconds: number) {
     const time = Math.max(0, Math.min(this.totalDuration, milliseconds));
     if (typeof this.from !== 'number') { this.apply?.(this.value, this.velocity, time); return this.value; }
-    if (this.settle && this.boundary != null && time >= this.crossingTime) {
+    if (time >= this.totalDuration) {
+      this.value = this.target; this.velocity = 0;
+    } else if (this.settle && this.boundary != null && time >= this.crossingTime) {
       this.value = this.settle.sampleAt(time - this.crossingTime) as T; this.velocity = this.settle.velocity as T | number;
     } else {
-      const tau = Math.max(1, this.options.timeConstant ?? 325); const v0 = numericVelocity(this.initialVelocity) * (this.options.power ?? .8);
-      this.value = (this.from + v0 * tau * (1 - Math.exp(-time / tau))) as T;
-      this.velocity = (v0 * Math.exp(-time / tau)) as T | number;
-      if (!this.settle && time >= this.totalDuration) { this.value = this.target; this.velocity = 0; }
+      const tau = Math.max(1, this.options.timeConstant ?? 325);
+      const v0 = this.retargetedVelocity ?? numericVelocity(this.initialVelocity) * (this.options.power ?? .8);
+      if (this.hasRetargetedTail && time >= this.decayTime) {
+        // The quadratic tail matches exponential position/velocity at its start
+        // and reaches the target with zero velocity, without overshoot or a jump.
+        const remaining = 1 - (time - this.decayTime) / (2 * tau);
+        const tailVelocity = v0 * Math.exp(-this.decayTime / tau);
+        this.value = ((this.target as number) - tailVelocity * tau * remaining * remaining) as T;
+        this.velocity = (tailVelocity * remaining) as T | number;
+      } else {
+        this.value = (this.from + v0 * tau * (1 - Math.exp(-time / tau))) as T;
+        this.velocity = (v0 * Math.exp(-time / tau)) as T | number;
+      }
     }
     this.apply?.(this.value, this.velocity, time); return this.value;
   }

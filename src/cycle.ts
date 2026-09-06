@@ -29,7 +29,7 @@ export function totalDuration(spec: Pick<CycleSpec, 'duration' | 'delay' | 'repe
 
 /**
  * Pure repeat/yoyo/direction sampler shared by `Tween` and offline rendering.
- * Extracted from the original `Tween.sampleAt` math; must stay bit-for-bit identical.
+ * Shared reference for positive-duration folding and zero-duration endpoint policy.
  */
 export function sampleCycle(spec: CycleSpec, milliseconds: number): CycleSample {
   const active = Math.max(0, milliseconds - spec.delay);
@@ -39,9 +39,10 @@ export function sampleCycle(spec: CycleSpec, milliseconds: number): CycleSample 
   if (spec.duration === Infinity) return { iteration: 0, cycleTime: active, progress: 0, active };
   const cycleDuration = spec.duration + spec.repeatDelay;
   const iteration = spec.duration === 0
-    ? spec.repeat
-    : Math.min(spec.repeat, Math.floor(active / Math.max(1, cycleDuration)));
-  const cycleTime = Math.min(spec.duration, Math.max(0, active - iteration * cycleDuration));
+    ? (spec.repeat === Infinity ? 0 : spec.repeat)
+    : Math.min(spec.repeat, Math.floor(active / cycleDuration));
+  // Instantaneous infinite repeats have no last lap: use the first lap's endpoint.
+  const cycleTime = spec.duration === 0 ? 0 : Math.min(spec.duration, Math.max(0, active - iteration * cycleDuration));
   let raw = spec.duration === 0 ? 1 : cycleTime / spec.duration;
   const alternating = spec.direction === 'alternate' || spec.direction === 'alternate-reverse';
   const startsReverse = spec.direction === 'reverse' || spec.direction === 'alternate-reverse';

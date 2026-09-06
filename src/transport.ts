@@ -76,6 +76,9 @@ export class Transport {
   private explicitDuration?: number;
   private removeFrame?: () => void;
   private outputs = new Set<TransportOutput>();
+  private offlineActive = false;
+  private offlineFirstFrame = false;
+  private offlineInvalidated = false;
   private pendingCues: CueEvent[] | null = null;
   private listeners = new Set<(info: FrameInfo, transport: Transport) => void>();
   private loopListeners = new Set<() => void>();
@@ -106,6 +109,7 @@ export class Transport {
   add(item: TimelineItem, at?: TimelinePosition): this { this.root.add(item, at); return this; }
 
   attach(output: TransportOutput): () => void {
+    if (this.offlineActive && output.supportsOffline === false) throw new Error('Cannot attach a live output during offline rendering.');
     this.outputs.add(output);
     output.onAttach?.(this);
     return () => { if (this.outputs.delete(output)) output.onDetach?.(); };
@@ -130,6 +134,7 @@ export class Transport {
   }
 
   play(): this {
+    if (this.offlineActive) throw new Error('Cannot play a transport while an offline render is active.');
     if (this._state === 'playing') return this;
     if (this._state === 'finished') {
       this._time = this._rate >= 0 ? 0 : this.boundedDuration();
@@ -166,6 +171,7 @@ export class Transport {
   toggle(): this { return this._state === 'playing' ? this.pause() : this.play(); }
 
   seek(to: TimeInput, options: { cues?: 'fire' | 'skip' } = {}): this {
+    if (this.offlineActive && this.offlineInvalidated) throw new Error('The transport was disposed during offline rendering.');
     // An infinite root has no finite endpoint, but finite absolute seeks are
     // still meaningful (and sample the appropriate repeat iteration).
     let target = Math.max(0, Math.min(this.duration, parseTime(to, this.frameRate)));
@@ -174,7 +180,7 @@ export class Transport {
     if (!Number.isFinite(target)) return this;
     // Loop ranges are half-open: their upper bound is the next lap's first instant.
     // Mapping an exact seek keeps frame `b` from leaking between `b - 1f` and `a`.
-    if (this.loopRegion && target === this.loopRegion[1]) {
+    if (!this.offlineActive && this.loopRegion && target === this.loopRegion[1]) {
       const [a, b] = this.loopRegion;
       const carriedCues = this.renderAt(b, options.cues !== 'skip', { emit: false, direction: 1 });
       this.fireLoop();
@@ -234,9 +240,28 @@ export class Transport {
   }
 
   /** Manually drive the transport from an absolute clock value. Used by offline rendering and tests. */
-  tick(now: number): void { this.advance(now); }
+  tick(now: number): void {
+    if (this.offlineActive) throw new Error('Cannot tick a transport while an offline render is active.');
+    this.advance(now);
+  }
+
+  /** Acquire exclusive offline clock ownership. Release in finally; capture may
+   * await, but playback and another export cannot restart this clock meanwhile.
+   * Callers must still avoid mutating/explicitly seeking the graph during capture.
+   */
+  beginOffline(): () => void {
+    if (this._state === 'playing') throw new Error('Pause the playing transport before offline rendering.');
+    if (this.offlineActive) throw new Error('An offline render is already active on this transport.');
+    if ([...this.outputs].some((output) => output.supportsOffline === false)) throw new Error('Detach live outputs before offline rendering.');
+    this.offlineActive = true;
+    this.offlineFirstFrame = true;
+    this.offlineInvalidated = false;
+    let released = false;
+    return () => { if (!released) { released = true; this.offlineActive = false; } };
+  }
 
   dispose(): void {
+    if (this.offlineActive) this.offlineInvalidated = true;
     this.removeFrame?.();
     this.removeFrame = undefined;
     // Effect reattachment must not leave a canceled clock claiming to play.
@@ -300,8 +325,9 @@ export class Transport {
 
   private renderAt(time: number, fireCues: boolean, options: { emit?: boolean; direction?: 1 | -1; carriedCues?: CueEvent[] } = {}): CueEvent[] {
     const quantized = this.snap ? this.frameSnap(time) : time;
-    const direction: 1 | -1 = options.direction ?? (quantized >= this.lastRenderedTime ? 1 : -1);
-    const delta = quantized - this.lastRenderedTime;
+    const direction: 1 | -1 = options.direction ?? (this.offlineActive || quantized >= this.lastRenderedTime ? 1 : -1);
+    const delta = this.offlineActive && this.offlineFirstFrame ? 0 : quantized - this.lastRenderedTime;
+    this.offlineFirstFrame = false;
     this._time = quantized;
     const info: FrameInfo = {
       time: quantized,

@@ -39,6 +39,11 @@ export interface TimelineOptions {
 
 export type TimelinePosition = number | '<' | '>' | string;
 interface TimelineEntry { item: TimelineItem; start: number; end: number; }
+type AuthoredPlacement =
+  | { kind: 'item'; entry: TimelineEntry; at?: TimelinePosition }
+  | { kind: 'marker'; name: string; at?: TimelinePosition }
+  | { kind: 'cue'; point: CrossingPoint; at: TimelinePosition }
+  | { kind: 'region'; start: CrossingPoint; end: CrossingPoint; from: TimelinePosition; to: TimelinePosition };
 
 interface CrossingPoint {
   name: string;
@@ -66,6 +71,7 @@ export class Timeline implements TimelineItem {
   readonly options: TimelineOptions;
 
   private entries: TimelineEntry[] = [];
+  private authoredPlacements: AuthoredPlacement[] = [];
   private labels = new Map<string, number>();
   private cursor = 0;
   /** The furthest a marker/cue/region reaches; a cue-only timeline (no content) still has a real, sampleable duration. */
@@ -121,19 +127,36 @@ export class Timeline implements TimelineItem {
   /** Adopt a containing timeline/transport timebase and remeasure every descendant item. Explicit timeline rates still win. */
   bindFrameRate(rate: FrameRateInput) {
     this.inheritedRateInput = rate;
-    for (const entry of this.entries) {
-      entry.item.bindFrameRate?.(this.frameRate);
-      entry.end = entry.start + entry.item.totalDuration;
+    // Replay the authoring program, not a sorted schedule: anchors and labels
+    // refer to what existed when each expression was authored.
+    const labels = new Map<string, number>();
+    let previous: TimelineEntry | undefined;
+    let cursor = 0; let markerCursor = 0;
+    for (const operation of this.authoredPlacements) {
+      if (operation.kind === 'item') {
+        const { entry } = operation;
+        entry.item.bindFrameRate?.(this.frameRate);
+        entry.start = this.resolvePosition(operation.at, previous, labels);
+        entry.end = entry.start + entry.item.totalDuration;
+        cursor = Math.max(cursor, entry.end); previous = entry;
+      } else if (operation.kind === 'marker') {
+        const time = this.resolvePosition(operation.at ?? cursor, previous, labels);
+        labels.set(operation.name, time); markerCursor = Math.max(markerCursor, time);
+      } else if (operation.kind === 'cue') {
+        operation.point.time = this.resolvePosition(operation.at, previous, labels);
+        markerCursor = Math.max(markerCursor, operation.point.time);
+      } else {
+        operation.start.time = this.resolvePosition(operation.from, previous, labels);
+        operation.end.time = this.resolvePosition(operation.to, previous, labels);
+        markerCursor = Math.max(markerCursor, operation.start.time, operation.end.time);
+      }
     }
-    this.cursor = this.entries.reduce((max, entry) => Math.max(max, entry.end), 0);
+    this.labels = labels; this.cursor = cursor; this.markerCursor = markerCursor;
+    this.points = this.authoredPlacements.flatMap((entry) => entry.kind === 'cue' ? [entry.point] : entry.kind === 'region' ? [entry.start, entry.end] : []);
+    this.points.sort((a, b) => a.time - b.time);
   }
 
-  label(name: string, at: TimelinePosition = this.cursor) {
-    const time = this.resolvePosition(at, this.entries.at(-1));
-    this.labels.set(name, time);
-    this.markerCursor = Math.max(this.markerCursor, time);
-    return this;
-  }
+  label(name: string, at?: TimelinePosition) { return this.marker(name, at); }
 
   add(item: TimelineItem, at?: TimelinePosition): this {
     if (item instanceof Timeline) {
@@ -142,16 +165,19 @@ export class Timeline implements TimelineItem {
       }
       if (item.parentTimeline) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ''} is already attached to another timeline.`);
       if (item.ownTransport) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ''} already has its own transport (it was played directly); nest it before playing it.`);
-      item.parentTimeline = this;
     }
+    // Resolve before touching child ownership or its inherited timebase.
+    const previous = this.entries.at(-1);
+    const start = this.resolvePosition(at, previous);
     // A root with no authored/inherited rate is still provisional: children already
     // use their own 60fps (or drop-frame) fallback and will be rebound by Transport.
     // Avoid replacing that provisional context with an indistinguishable default 60.
     if (this.explicitRateInput !== undefined || this.inheritedRateInput !== undefined) item.bindFrameRate?.(this.frameRate);
-    const previous = this.entries.at(-1);
-    const start = this.resolvePosition(at, previous);
     const end = start + item.totalDuration;
-    this.entries.push({ item, start, end });
+    const entry = { item, start, end };
+    if (item instanceof Timeline) item.parentTimeline = this;
+    this.entries.push(entry);
+    this.authoredPlacements.push({ kind: 'item', entry, at });
     this.cursor = Math.max(this.cursor, end);
     return this;
   }
@@ -162,7 +188,8 @@ export class Timeline implements TimelineItem {
   remove(item: TimelineItem): this {
     const index = this.entries.findIndex((entry) => entry.item === item);
     if (index === -1) return this;
-    this.entries.splice(index, 1);
+    const [removed] = this.entries.splice(index, 1);
+    this.authoredPlacements = this.authoredPlacements.filter((operation) => operation.kind !== 'item' || operation.entry !== removed);
     if (item instanceof Timeline && item.parentTimeline === this) item.parentTimeline = undefined;
     this.cursor = this.entries.reduce((max, entry) => Math.max(max, entry.end), 0);
     return this;
@@ -170,6 +197,7 @@ export class Timeline implements TimelineItem {
   clear(): this {
     for (const entry of this.entries) if (entry.item instanceof Timeline && entry.item.parentTimeline === this) entry.item.parentTimeline = undefined;
     this.entries = [];
+    this.authoredPlacements = [];
     this.labels.clear();
     this.markerMeta.clear();
     this.points = [];
@@ -189,17 +217,20 @@ export class Timeline implements TimelineItem {
   get cues(): readonly { name: string; time: number }[] {
     return this.points.map((p) => ({ name: p.name, time: p.time })).sort((a, b) => a.time - b.time);
   }
-  marker(name: string, at: TimelinePosition = this.cursor, options: { color?: string; payload?: unknown } = {}): this {
-    const time = this.resolvePosition(at, this.entries.at(-1));
+  marker(name: string, at?: TimelinePosition, options: { color?: string; payload?: unknown } = {}): this {
+    const time = this.resolvePosition(at ?? this.cursor, this.entries.at(-1));
     this.labels.set(name, time);
     this.markerCursor = Math.max(this.markerCursor, time);
     if (options.color != null || options.payload !== undefined) this.markerMeta.set(name, options);
+    this.authoredPlacements.push({ kind: 'marker', name, at });
     return this;
   }
 
   cue(name: string, at: TimelinePosition, handler: (e: CueEvent) => void, options: CueOptions = {}): this {
     const time = this.resolvePosition(at, this.entries.at(-1));
-    this.insertPoint({ name, time, payload: options.payload, once: options.once ?? false, fired: false, onForward: handler, onBackward: handler });
+    const point = { name, time, payload: options.payload, once: options.once ?? false, fired: false, onForward: handler, onBackward: handler };
+    this.insertPoint(point);
+    this.authoredPlacements.push({ kind: 'cue', point, at });
     return this;
   }
 
@@ -209,9 +240,20 @@ export class Timeline implements TimelineItem {
     const toTime = this.resolvePosition(to, previous);
     const payload = options.payload;
     const once = options.once ?? false;
-    this.insertPoint({ name, time: fromTime, payload, once, fired: false, onForward: options.onEnter, onBackward: options.onExit });
-    this.insertPoint({ name, time: toTime, payload, once, fired: false, onForward: options.onExit, onBackward: options.onEnter });
+    const start = { name, time: fromTime, payload, once, fired: false, onForward: options.onEnter, onBackward: options.onExit };
+    const end = { name, time: toTime, payload, once, fired: false, onForward: options.onExit, onBackward: options.onEnter };
+    this.insertPoint(start); this.insertPoint(end);
+    this.authoredPlacements.push({ kind: 'region', start, end, from, to });
     return this;
+  }
+
+  /** Serializable cue/region metadata without flattening regions into two cues. Handlers are deliberately excluded. */
+  serializationMetadata() {
+    const payload = (point: CrossingPoint) => ({ ...(point.once ? { once: true } : {}), ...(point.payload !== undefined ? { payload: point.payload } : {}) });
+    return {
+      cues: this.authoredPlacements.flatMap((entry) => entry.kind === 'cue' ? [{ name: entry.point.name, at: entry.point.time, ...payload(entry.point) }] : []),
+      regions: this.authoredPlacements.flatMap((entry) => entry.kind === 'region' ? [{ name: entry.start.name, from: entry.start.time, to: entry.end.time, ...payload(entry.start) }] : []),
+    };
   }
 
   private insertPoint(point: CrossingPoint) {
@@ -364,6 +406,26 @@ export class Timeline implements TimelineItem {
     for (const entry of this.entries) entry.item.reset?.();
   }
 
+  /** Reset cue state for a fresh inclusive offline range without sampling values
+   * or invoking update/completion handlers during crossing-history preparation.
+   */
+  resetBefore(localMs: number) {
+    this.reset();
+    if (localMs > 0) this.primeCrossings(localMs - Math.max(1e-7, Math.abs(localMs) * Number.EPSILON * 2));
+  }
+
+  private primeCrossings(localMs: number) {
+    // Before a nested child starts, keep its reset (unvisited) history. Folding
+    // negative local time to zero would consume that child's inclusive cue zero.
+    if (localMs < 0) return;
+    const { cycleTime, iteration } = sampleCycle({ duration: this.duration, delay: 0, repeat: this.options.repeat ?? 0,
+      repeatDelay: this.repeatDelay, direction: this.options.yoyo ? 'alternate' : 'normal', reversed: false }, localMs);
+    const contentTime = this.iterationReversed(iteration) && Number.isFinite(this.duration) ? this.duration - cycleTime : cycleTime;
+    this.lastCycleTime = contentTime;
+    this.lastIteration = iteration;
+    for (const entry of this.entries) if (entry.item instanceof Timeline) entry.item.primeCrossings(contentTime - entry.start);
+  }
+
   private iterationReversed(iteration: number): boolean {
     return this.options.yoyo === true && iteration % 2 === 1;
   }
@@ -414,7 +476,7 @@ export class Timeline implements TimelineItem {
   }
 
   // ---- positions --------------------------------------------------------
-  private resolvePosition(at: TimelinePosition | undefined, previous?: TimelineEntry): number {
+  private resolvePosition(at: TimelinePosition | undefined, previous?: TimelineEntry, labels = this.labels): number {
     if (at == null) return previous?.end ?? 0;
     if (typeof at === 'number') return Math.max(0, at);
     const text = at.trim();
@@ -431,7 +493,7 @@ export class Timeline implements TimelineItem {
 
     const labelMatch = text.match(LABEL_OFFSET_RE);
     const labelName = labelMatch ? labelMatch[1] : text;
-    const base = this.labels.get(labelName);
+    const base = labels.get(labelName);
     if (base == null) throw new Error(`Unknown timeline label: ${at}`);
     if (!labelMatch) return Math.max(0, base);
     return Math.max(0, base + parseTime(labelMatch[3], this.frameRate) * (labelMatch[2] === '+=' ? 1 : -1));

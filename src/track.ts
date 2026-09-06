@@ -1,5 +1,5 @@
 import { interpolate, type MotionValueShape } from './interpolate';
-import { resolveEasing, type EasingFunction, type EasingInput } from './easing';
+import { resolveEasing, serializeEasing, type EasingFunction, type EasingInput } from './easing';
 import { frameRate as resolveFrameRate, parseTime, type FrameRateInput, type TimeInput } from './time';
 import { sampleCycle, totalDuration as cycleTotalDuration, type Direction } from './cycle';
 import type { RenderContext, TimelineItem } from './items';
@@ -58,6 +58,13 @@ export class Track<T extends MotionValueShape> implements TimelineItem {
   }
 
   get keyframes() { return this.resolvedKeyframes; }
+  /** Resolved timing plus complete segment/playback metadata for runtime sheet serialization. */
+  serializationOptions() {
+    return {
+      keyframes: this.keyframes.map((key, index) => ({ ...key, ...(index ? { easing: serializeEasing(this.segments[index - 1].ease) } : {}) })),
+      repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction,
+    };
+  }
   get frameRate() {
     const authored = [...this.authoredKeyframes.map((keyframe) => keyframe.at), this.repeatDelayInput];
     const provisional = authored.some((input) => typeof input === 'string' && input.includes(';')) ? '29.97df' : 60;
@@ -90,8 +97,14 @@ export class Track<T extends MotionValueShape> implements TimelineItem {
     const last = this.keyframes.at(-1)!;
     if (this.keyframes.length === 1 || ms <= first.at) return first.value;
     if (ms >= last.at) return last.value;
-    const index = this.segments.findIndex((segment) => ms <= segment.to);
-    const segment = this.segments[index === -1 ? this.segments.length - 1 : index];
+    // Lower bound preserves the old findIndex rule at duplicate-time keys.
+    let low = 0; let high = this.segments.length - 1;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (ms <= this.segments[mid].to) high = mid; else low = mid + 1;
+    }
+    const index = low;
+    const segment = this.segments[index];
     const from = this.keyframes[index];
     const to = this.keyframes[index + 1];
     const span = segment.to - segment.from;
