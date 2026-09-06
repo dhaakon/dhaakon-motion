@@ -25,6 +25,8 @@ test('legacy links resolve to real routes and malformed hashes remain safe', () 
 
 test('every package entry resolves to source in docs and unit tests', () => {
   for (const entry of Object.keys(pkg.exports)) {
+    // Generated Wasm assets are not TS runtime entries; packed-consumer tests check them.
+    if (entry === './wasm/*') continue;
     const name = '@dhaakon/motion' + entry.slice(1);
     const matches = sourceAliases.filter((alias) => alias.find.test(name));
     expect(matches, name).toHaveLength(1);

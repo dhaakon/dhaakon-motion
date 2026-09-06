@@ -8,6 +8,8 @@ declare class FrameScheduler {
     private driver;
     private tasks;
     private frame;
+    /** Failed tasks remain registered for the next frame; remove one here to opt out of retries. */
+    onError: (error: unknown, task: FrameTask) => void;
     constructor(driver?: FrameDriver);
     get size(): number;
     now(): number;
@@ -95,7 +97,7 @@ type EasingTuple = ['cubicBezier', number, number, number, number] | ['spring', 
     stiffness?: number;
     damping?: number;
     mass?: number;
-}] | ['steps', number];
+}] | ['steps', number, ('start' | 'end')?];
 /** Anything that can describe an easing curve: a built-in or registered name, a tuple that builds one, or a function directly. */
 type EasingInput = EasingFunction | EasingTuple | string;
 declare function cubicBezier(x1: number, y1: number, x2: number, y2: number): EasingFunction;
@@ -162,7 +164,7 @@ declare function activeDuration(spec: Pick<CycleSpec, 'duration' | 'repeat' | 'r
 declare function totalDuration(spec: Pick<CycleSpec, 'duration' | 'delay' | 'repeat' | 'repeatDelay'>): number;
 /**
  * Pure repeat/yoyo/direction sampler shared by `Tween` and offline rendering.
- * Extracted from the original `Tween.sampleAt` math; must stay bit-for-bit identical.
+ * Shared reference for positive-duration folding and zero-duration endpoint policy.
  */
 declare function sampleCycle(spec: CycleSpec, milliseconds: number): CycleSample;
 
@@ -256,6 +258,17 @@ declare class Track<T extends MotionValueShape> implements TimelineItem {
         at: number;
         value: T;
     }[];
+    /** Resolved timing plus complete segment/playback metadata for runtime sheet serialization. */
+    serializationOptions(): {
+        keyframes: {
+            easing?: EasingInput | undefined;
+            at: number;
+            value: T;
+        }[];
+        repeat: number;
+        repeatDelay: number;
+        direction: Direction;
+    };
     get frameRate(): FrameRate;
     bindFrameRate(rate: FrameRateInput): void;
     private resolveTiming;
@@ -293,8 +306,14 @@ interface InertiaOptions<T = number> {
     timeConstant?: number;
     min?: number;
     max?: number;
+    /** Bounds spring by default; false stops at the first bound without overshoot. */
     bounce?: PhysicsSpringOptions<T> | false;
     restDelta?: number;
+    /**
+     * Changes the exponential amplitude to target - from (and therefore its initial
+     * velocity). A changed, unbounded target gets a continuous two-time-constant
+     * settling tail; unchanged targets retain the legacy exponential cutoff.
+     */
     modifyTarget?(projected: number): number;
     scheduler?: FrameScheduler;
 }
@@ -355,6 +374,9 @@ declare class InertiaItem<T extends MotionValueShape = number> extends PhysicsIt
     private boundary?;
     private crossingTime;
     private settle?;
+    private retargetedVelocity?;
+    private decayTime;
+    private hasRetargetedTail;
     constructor(options: InertiaItemOptions<T>);
     sampleAt(milliseconds: number): T;
 }
@@ -434,6 +456,7 @@ declare class Tween<T extends MotionValueShape = number> implements TimelineItem
     value: T;
     progress: number;
     elapsed: number;
+    private sampledTime;
     private durationInput;
     private delayInput;
     private repeatDelayInput;
@@ -464,7 +487,7 @@ declare class Tween<T extends MotionValueShape = number> implements TimelineItem
     /** The SMPTE timecode for the tween's active time, at `rate`. */
     timecodeAt(rate: FrameRateInput): Timecode;
     getCurrentFrame(fps?: number): number;
-    /** Analytic/numerically differentiated velocity of the current tween value, in units per millisecond. */
+    /** Derivative for increasing sampled local time, in units/ms; stationary phases return zero. */
     instantaneousVelocity(): T | number;
     /**
      * A two-keyframe `Track` equivalent to this tween's `from`/`to`/`duration`/`easing`/`repeat`/`repeatDelay`/`direction`.
@@ -546,6 +569,7 @@ declare class Timeline implements TimelineItem {
     name?: string;
     readonly options: TimelineOptions;
     private entries;
+    private authoredPlacements;
     private labels;
     private cursor;
     /** The furthest a marker/cue/region reaches; a cue-only timeline (no content) still has a real, sampleable duration. */
@@ -597,6 +621,22 @@ declare class Timeline implements TimelineItem {
     }): this;
     cue(name: string, at: TimelinePosition, handler: (e: CueEvent) => void, options?: CueOptions): this;
     region(name: string, from: TimelinePosition, to: TimelinePosition, options?: CueOptions): this;
+    /** Serializable cue/region metadata without flattening regions into two cues. Handlers are deliberately excluded. */
+    serializationMetadata(): {
+        cues: {
+            payload?: {} | null | undefined;
+            once?: boolean | undefined;
+            name: string;
+            at: number;
+        }[];
+        regions: {
+            payload?: {} | null | undefined;
+            once?: boolean | undefined;
+            name: string;
+            from: number;
+            to: number;
+        }[];
+    };
     private insertPoint;
     seekToMarker(name: string): this;
     nextMarker(fromMs?: number): Marker | undefined;
@@ -635,6 +675,11 @@ declare class Timeline implements TimelineItem {
     /** Alias of `sampleAt` for absolute (not delay-relative) callers, matching the pre-0.4 API. */
     render(time: number): void;
     reset(): void;
+    /** Reset cue state for a fresh inclusive offline range without sampling values
+     * or invoking update/completion handlers during crossing-history preparation.
+     */
+    resetBefore(localMs: number): void;
+    private primeCrossings;
     private iterationReversed;
     private fireCrossings;
     private fireSegment;
@@ -728,6 +773,9 @@ declare class Transport {
     private explicitDuration?;
     private removeFrame?;
     private outputs;
+    private offlineActive;
+    private offlineFirstFrame;
+    private offlineInvalidated;
     private pendingCues;
     private listeners;
     private loopListeners;
@@ -770,6 +818,11 @@ declare class Transport {
     }): this;
     /** Manually drive the transport from an absolute clock value. Used by offline rendering and tests. */
     tick(now: number): void;
+    /** Acquire exclusive offline clock ownership. Release in finally; capture may
+     * await, but playback and another export cannot restart this clock meanwhile.
+     * Callers must still avoid mutating/explicitly seeking the graph during capture.
+     */
+    beginOffline(): () => void;
     dispose(): void;
     private onFrame;
     private advance;

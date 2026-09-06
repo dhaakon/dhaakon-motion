@@ -10,6 +10,7 @@ export default defineConfig({
     testing: 'src/testing.ts',
     devtools: 'src/devtools.ts',
     gesture: 'src/gesture/index.ts',
+    compiled: 'src/compiled.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,

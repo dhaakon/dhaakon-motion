@@ -7,6 +7,7 @@
   "sideEffects": false,
   "files": [
     "dist",
+    "wasm",
     "README.md"
   ],
   "main": "./dist/index.cjs",
@@ -48,6 +49,12 @@
       "import": "./dist/devtools.js",
       "require": "./dist/devtools.cjs"
     },
+    "./compiled": {
+      "types": "./dist/compiled.d.ts",
+      "import": "./dist/compiled.js",
+      "require": "./dist/compiled.cjs"
+    },
+    "./wasm/*": "./wasm/*",
     "./gesture": {
       "types": "./dist/gesture.d.ts",
       "import": "./dist/gesture.js",
@@ -59,6 +66,13 @@
   },
   "scripts": {
     "build": "tsup",
+    "rust:setup": "node scripts/setup-rust.mjs",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "bench:engine": "node --expose-gc scripts/bench-engine.mjs",
+    "test:wasm": "node scripts/test-wasm.mjs",
+    "test:rust": "node scripts/test-rust.mjs",
+    "test:packed-engine": "node scripts/test-packed-engine.mjs",
+    "profile:cue": "npm run docs:build && node scripts/profile-cue.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:dist": "npm run build && node --test tests/dist/*.test.mjs",

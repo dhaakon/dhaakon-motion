@@ -1,4 +1,4 @@
-import { T as Transport } from './transport-NA0I1mIJ.cjs';
+import { T as Transport } from './transport-BfypQYnz.cjs';
 
 interface MountInspectorOptions {
     container?: HTMLElement;

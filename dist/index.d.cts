@@ -1,5 +1,5 @@
-import { T as Transport, a as TransportOutput, F as FrameRateInput, b as TimeInput, c as Timeline, d as FrameInfo, K as Keyframe, e as TrackOptions, f as Track, C as CueEvent, g as TweenOptions, M as MotionValueShape, E as EasingInput, h as MotionValue, i as EasingFunction, j as TimelineItem, k as Tween, L as Line, l as animate, s as stagger, m as cubicBezier, n as spring } from './transport-NA0I1mIJ.cjs';
-export { o as Clock, p as CueOptions, q as CycleSample, r as CycleSpec, D as Direction, t as Easing, u as EasingName, v as EasingTuple, w as FrameDriver, x as FrameRate, y as FrameRates, z as FrameScheduler, A as FrameTask, I as InertiaItem, B as InertiaItemOptions, G as InertiaOptions, H as InspectNode, J as Marker, N as MotionPrimitive, P as PhysicsSpringOptions, O as PropertyRange, R as RenderContext, S as SpringItem, Q as SpringItemOptions, U as SpringOptions, V as Timecode, W as TimelineOptions, X as TimelinePosition, Y as Trace, Z as TraceEntry, _ as TransportOptions, $ as TransportState, a0 as TweenState, a1 as VelocityShape, a2 as activeDuration, a3 as addFrames, a4 as clampWithRubberband, a5 as createTrace, a6 as defaultRenderContext, a7 as formatTime, a8 as formatTimecode, a9 as frameRate, aa as frameToMs, ab as framesToTimecode, ac as interpolate, ad as mix, ae as msToFrame, af as msToTimecode, ag as parseTime, ah as parseTimecode, ai as projectFling, aj as registerEasing, ak as resolveEasing, al as rubberband, am as sampleCycle, an as scheduler, ao as serializeEasing, ap as snapTo, aq as snapToFrame, ar as springDuration, as as steps, at as stiffnessFor, au as timecodeToFrames, av as timecodeToMs, aw as totalDuration, ax as track } from './transport-NA0I1mIJ.cjs';
+import { T as Transport, a as TransportOutput, F as FrameRateInput, b as TimeInput, c as Timeline, d as FrameInfo, K as Keyframe, e as TrackOptions, f as Track, C as CueEvent, g as TweenOptions, M as MotionValueShape, E as EasingInput, D as Direction, h as MotionValue, i as EasingFunction, j as TimelineItem, k as Tween, L as Line, l as animate, s as stagger, m as cubicBezier, n as spring } from './transport-BfypQYnz.cjs';
+export { o as Clock, p as CueOptions, q as CycleSample, r as CycleSpec, t as Easing, u as EasingName, v as EasingTuple, w as FrameDriver, x as FrameRate, y as FrameRates, z as FrameScheduler, A as FrameTask, I as InertiaItem, B as InertiaItemOptions, G as InertiaOptions, H as InspectNode, J as Marker, N as MotionPrimitive, P as PhysicsSpringOptions, O as PropertyRange, R as RenderContext, S as SpringItem, Q as SpringItemOptions, U as SpringOptions, V as Timecode, W as TimelineOptions, X as TimelinePosition, Y as Trace, Z as TraceEntry, _ as TransportOptions, $ as TransportState, a0 as TweenState, a1 as VelocityShape, a2 as activeDuration, a3 as addFrames, a4 as clampWithRubberband, a5 as createTrace, a6 as defaultRenderContext, a7 as formatTime, a8 as formatTimecode, a9 as frameRate, aa as frameToMs, ab as framesToTimecode, ac as interpolate, ad as mix, ae as msToFrame, af as msToTimecode, ag as parseTime, ah as parseTimecode, ai as projectFling, aj as registerEasing, ak as resolveEasing, al as rubberband, am as sampleCycle, an as scheduler, ao as serializeEasing, ap as snapTo, aq as snapToFrame, ar as springDuration, as as steps, at as stiffnessFor, au as timecodeToFrames, av as timecodeToMs, aw as totalDuration, ax as track } from './transport-BfypQYnz.cjs';
 
 /**
  * A `Transport` meant for offline export rather than real-time playback: it
@@ -24,8 +24,12 @@ interface RenderFramesOptions {
  * accumulation-free frame clock, calling `onFrame` once per frame after every
  * value has been written and every attached output has drawn. Deterministic:
  * running it twice, or resuming it on the same transport from where a prior
- * call left off, produces identical output. Resuming is detected by `from > 0`,
- * which skips the reset-and-clear-cue-state a fresh run performs at `from <= 0`.
+ * call left off, produces identical sampled values. First use (including a partial
+ * range), or `from <= 0`, resets cue history and includes the first boundary.
+ * Subsequent `from > 0` calls resume existing crossing/once state. The owning
+ * transport is reused, remains at the final sampled time, and must not be playing.
+ * Playback loop wrapping is suspended during capture (the loop setting survives).
+ * Explicit seeks/graph edits by the caller during capture remain unsupported.
  */
 declare function renderFrames(source: Transport | Timeline, onFrame: (info: FrameInfo) => void | Promise<void>, options?: RenderFramesOptions): Promise<{
     frames: number;
@@ -103,7 +107,7 @@ interface TrackSheetItem {
     target?: string;
     repeat?: number;
     repeatDelay?: TimeInput;
-    direction?: SheetDirection;
+    direction?: Direction;
     easing?: EasingInput;
     keyframes: Array<{
         at: TimeInput;
@@ -189,9 +193,17 @@ interface SheetBindings {
 /** Build a live `Timeline` (with a nested `Timeline`/`Tween`/`Track` for every item) from a `CueSheet`. */
 declare function loadSheet(sheet: CueSheet | string, bindings?: SheetBindings, options?: {
     strict?: boolean;
+    limits?: Partial<SheetLimits>;
 }): Timeline;
-/** `loadSheet`'s inverse: read a `Timeline` back into a `CueSheet`. Positions are saved as milliseconds; target bindings round-trip if the timeline was itself built with `loadSheet`. */
-declare function saveSheet(timeline: Timeline): CueSheet;
+/**
+ * Loaded sheets default to a detached copy of their original authored snapshot,
+ * including expressions/extensions. Runtime edits do not alter that snapshot.
+ * `source: 'runtime'` explicitly serializes the live graph with resolved times;
+ * opaque extension state and anonymous callbacks cannot be recovered that way.
+ */
+declare function saveSheet(timeline: Timeline, options?: {
+    source?: 'authored' | 'runtime';
+}): CueSheet;
 interface ValidationError {
     path: string;
     message: string;
@@ -203,8 +215,25 @@ type ValidationResult = {
     ok: false;
     errors: ValidationError[];
 };
-/** Hand-rolled structural validation: shape, frame rate legality, resolvable easings, and keyframe ordering (where checkable without a frame-rate context). */
-declare function validateSheet(input: unknown): ValidationResult;
+interface SheetLimits {
+    maxDepth: number;
+    maxNodes: number;
+    maxItems: number;
+    maxKeyframes: number;
+    maxStringLength: number;
+}
+declare const DEFAULT_SHEET_LIMITS: Readonly<SheetLimits>;
+interface SheetValidationOptions {
+    limits?: Partial<SheetLimits>;
+    easings?: Record<string, EasingFunction>;
+    /** Only structural/data limits can be checked for extensions. Their trusted factory validates semantics at load time. */
+    allowExtensions?: boolean;
+}
+/** Bounded data validation, with inherited timebases and contextual easing names.
+ * No callbacks, extension factories or getters are executed. This is not a sandbox
+ * for trusted host functions or a guarantee that an extension can be constructed.
+ */
+declare function validateSheet(input: unknown, options?: SheetValidationOptions): ValidationResult;
 type SceneState = Record<string, MotionValueShape>;
 interface SceneFile {
     $schema: 'dhaakon-motion/scene/1';
@@ -263,4 +292,4 @@ declare const _default: {
     spring: typeof spring;
 };
 
-export { type ApplySceneOptions, CueEvent, type CueSheet, EasingFunction, EasingInput, type ExtensionSheetItem, FrameInfo, FrameRateInput, type InertiaSheetItem, Keyframe, Line, type MotionStyle, MotionValue, MotionValueShape, OfflineTransport, type RenderFramesOptions, type SceneFile, type SceneSheetOptions, type SceneState, type SceneTransitionOptions, type SheetBindings, type SheetCue, type SheetDirection, type SheetItem, type SheetMarker, type SheetRegion, type SpringSheetItem, TimeInput, Timeline, TimelineItem, type TimelineSheetItem, Track, TrackOptions, type TrackSheetItem, Transport, TransportOutput, Tween, TweenOptions, type TweenSheetItem, type ValidationError, type ValidationResult, animate, applyScene, captureScene, cubicBezier, _default as default, drawOutput, frames, loadSheet, readStyle, renderFrames, saveSheet, sceneSheet, sceneTransition, signalOutput, spring, stagger, styleTrack, validateSheet, writeStyle };
+export { type ApplySceneOptions, CueEvent, type CueSheet, DEFAULT_SHEET_LIMITS, Direction, EasingFunction, EasingInput, type ExtensionSheetItem, FrameInfo, FrameRateInput, type InertiaSheetItem, Keyframe, Line, type MotionStyle, MotionValue, MotionValueShape, OfflineTransport, type RenderFramesOptions, type SceneFile, type SceneSheetOptions, type SceneState, type SceneTransitionOptions, type SheetBindings, type SheetCue, type SheetDirection, type SheetItem, type SheetLimits, type SheetMarker, type SheetRegion, type SheetValidationOptions, type SpringSheetItem, TimeInput, Timeline, TimelineItem, type TimelineSheetItem, Track, TrackOptions, type TrackSheetItem, Transport, TransportOutput, Tween, TweenOptions, type TweenSheetItem, type ValidationError, type ValidationResult, animate, applyScene, captureScene, cubicBezier, _default as default, drawOutput, frames, loadSheet, readStyle, renderFrames, saveSheet, sceneSheet, sceneTransition, signalOutput, spring, stagger, styleTrack, validateSheet, writeStyle };

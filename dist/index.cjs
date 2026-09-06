@@ -20,6 +20,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/index.ts
 var src_exports = {};
 __export(src_exports, {
+  DEFAULT_SHEET_LIMITS: () => DEFAULT_SHEET_LIMITS,
   Easing: () => Easing,
   FrameRates: () => FrameRates,
   FrameScheduler: () => FrameScheduler,
@@ -89,7 +90,11 @@ module.exports = __toCommonJS(src_exports);
 // src/easing.ts
 var clamp = (n) => Math.min(1, Math.max(0, n));
 var easingSource = /* @__PURE__ */ new WeakMap();
+function finiteParameter(value, name) {
+  if (!Number.isFinite(value)) throw new Error(`${name} must be a finite number`);
+}
 function cubicBezier(x1, y1, x2, y2) {
+  for (const [name, value] of Object.entries({ x1, y1, x2, y2 })) finiteParameter(value, `cubicBezier ${name}`);
   const sample = (a, b, t) => 3 * a * (1 - t) ** 2 * t + 3 * b * (1 - t) * t ** 2 + t ** 3;
   const fn = (progress) => {
     const x = clamp(progress);
@@ -109,7 +114,10 @@ function cubicBezier(x1, y1, x2, y2) {
   return fn;
 }
 function spring(options = {}) {
+  if (!options || typeof options !== "object" || Array.isArray(options)) throw new Error("spring options must be an object");
   const { stiffness = 170, damping = 26, mass = 1 } = options;
+  for (const [name, value] of Object.entries({ stiffness, damping, mass })) finiteParameter(value, `spring ${name}`);
+  if (stiffness <= 0 || mass <= 0 || damping < 0) throw new Error("spring needs positive stiffness/mass and nonnegative damping");
   const omega = Math.sqrt(stiffness / mass);
   const ratio = damping / (2 * Math.sqrt(stiffness * mass));
   const duration = 1;
@@ -122,17 +130,19 @@ function spring(options = {}) {
   };
   const end = response(duration) || 1;
   const fn = (t) => response(clamp(t) * duration) / end;
-  easingSource.set(fn, ["spring", options]);
+  easingSource.set(fn, ["spring", { ...options }]);
   return fn;
 }
 function steps(count, position = "end") {
+  finiteParameter(count, "steps count");
+  if (position !== "start" && position !== "end") throw new Error('steps position must be "start" or "end"');
   const n = Math.max(1, Math.round(count));
   const fn = (t) => {
     const x = clamp(t);
     const step = position === "start" ? Math.ceil(x * n) : Math.floor(x * n);
     return Math.min(1, Math.max(0, step / n));
   };
-  easingSource.set(fn, ["steps", n]);
+  easingSource.set(fn, position === "start" ? ["steps", n, "start"] : ["steps", n]);
   return fn;
 }
 var Easing = {
@@ -154,22 +164,24 @@ var builtinNames = new Map(
 );
 var registry = /* @__PURE__ */ new Map();
 function registerEasing(name, fn) {
+  if (typeof fn !== "function") throw new Error("Registered easing must be a function");
   registry.set(name, fn);
   return fn;
 }
 function resolveEasing(easing) {
-  if (!easing) return Easing.dhaakon;
+  if (easing == null || easing === "") return Easing.dhaakon;
   if (typeof easing === "function") return easing;
   if (typeof easing === "string") {
-    if (easing in Easing) return Easing[easing];
+    if (Object.prototype.hasOwnProperty.call(Easing, easing)) return Easing[easing];
     const registered = registry.get(easing);
     if (registered) return registered;
     throw new Error(`Unknown easing: "${easing}"`);
   }
+  if (!Array.isArray(easing)) throw new Error("Easing must be a name, function, or tuple");
   const [kind, ...args] = easing;
-  if (kind === "cubicBezier") return cubicBezier(...args);
-  if (kind === "spring") return spring(args[0]);
-  if (kind === "steps") return steps(args[0]);
+  if (kind === "cubicBezier" && args.length === 4) return cubicBezier(...args);
+  if (kind === "spring" && args.length <= 1) return spring(args[0]);
+  if (kind === "steps" && (args.length === 1 || args.length === 2)) return steps(args[0], args[1]);
   throw new Error(`Unknown easing tuple: ${JSON.stringify(easing)}`);
 }
 function serializeEasing(input) {
@@ -177,8 +189,9 @@ function serializeEasing(input) {
   if (typeof input !== "function") return input;
   const builtin = builtinNames.get(input);
   if (builtin) return builtin;
-  for (const [name, fn] of registry) if (fn === input) return name;
-  return easingSource.get(input);
+  for (const [name, fn] of registry) if (fn === input && !Object.prototype.hasOwnProperty.call(Easing, name)) return name;
+  const source = easingSource.get(input);
+  return source?.[0] === "spring" ? ["spring", { ...source[1] }] : source ? [...source] : void 0;
 }
 
 // src/interpolate.ts
@@ -238,6 +251,10 @@ var FrameScheduler = class {
   }
   tasks = /* @__PURE__ */ new Set();
   frame = null;
+  /** Failed tasks remain registered for the next frame; remove one here to opt out of retries. */
+  onError = (error) => {
+    console.error(error);
+  };
   get size() {
     return this.tasks.size;
   }
@@ -259,7 +276,18 @@ var FrameScheduler = class {
   flush(time = this.now()) {
     for (const task of [...this.tasks]) {
       if (!this.tasks.has(task)) continue;
-      if (task(time) === false) this.tasks.delete(task);
+      try {
+        if (task(time) === false) this.tasks.delete(task);
+      } catch (error) {
+        try {
+          this.onError(error, task);
+        } catch (reportError) {
+          try {
+            console.error(reportError);
+          } catch {
+          }
+        }
+      }
     }
   }
   clear() {
@@ -279,8 +307,11 @@ var FrameScheduler = class {
   }
   tick = (time) => {
     this.frame = null;
-    this.flush(time);
-    if (this.tasks.size) this.wake();
+    try {
+      this.flush(time);
+    } finally {
+      if (this.tasks.size) this.wake();
+    }
   };
 };
 var globalThisDriver = driver;
@@ -298,8 +329,8 @@ function sampleCycle(spec, milliseconds) {
   const active = Math.max(0, milliseconds - spec.delay);
   if (spec.duration === Infinity) return { iteration: 0, cycleTime: active, progress: 0, active };
   const cycleDuration = spec.duration + spec.repeatDelay;
-  const iteration = spec.duration === 0 ? spec.repeat : Math.min(spec.repeat, Math.floor(active / Math.max(1, cycleDuration)));
-  const cycleTime = Math.min(spec.duration, Math.max(0, active - iteration * cycleDuration));
+  const iteration = spec.duration === 0 ? spec.repeat === Infinity ? 0 : spec.repeat : Math.min(spec.repeat, Math.floor(active / cycleDuration));
+  const cycleTime = spec.duration === 0 ? 0 : Math.min(spec.duration, Math.max(0, active - iteration * cycleDuration));
   let raw = spec.duration === 0 ? 1 : cycleTime / spec.duration;
   const alternating = spec.direction === "alternate" || spec.direction === "alternate-reverse";
   const startsReverse = spec.direction === "reverse" || spec.direction === "alternate-reverse";
@@ -521,6 +552,15 @@ var Track = class {
   get keyframes() {
     return this.resolvedKeyframes;
   }
+  /** Resolved timing plus complete segment/playback metadata for runtime sheet serialization. */
+  serializationOptions() {
+    return {
+      keyframes: this.keyframes.map((key, index) => ({ ...key, ...index ? { easing: serializeEasing(this.segments[index - 1].ease) } : {} })),
+      repeat: this.repeat,
+      repeatDelay: this.repeatDelay,
+      direction: this.direction
+    };
+  }
   get frameRate() {
     const authored = [...this.authoredKeyframes.map((keyframe) => keyframe.at), this.repeatDelayInput];
     const provisional = authored.some((input) => typeof input === "string" && input.includes(";")) ? "29.97df" : 60;
@@ -553,8 +593,15 @@ var Track = class {
     const last = this.keyframes.at(-1);
     if (this.keyframes.length === 1 || ms <= first.at) return first.value;
     if (ms >= last.at) return last.value;
-    const index = this.segments.findIndex((segment2) => ms <= segment2.to);
-    const segment = this.segments[index === -1 ? this.segments.length - 1 : index];
+    let low = 0;
+    let high = this.segments.length - 1;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (ms <= this.segments[mid].to) high = mid;
+      else low = mid + 1;
+    }
+    const index = low;
+    const segment = this.segments[index];
     const from = this.keyframes[index];
     const to = this.keyframes[index + 1];
     const span = segment.to - segment.from;
@@ -750,6 +797,9 @@ var InertiaItem = class extends PhysicsItem {
   boundary;
   crossingTime = 0;
   settle;
+  retargetedVelocity;
+  decayTime = 0;
+  hasRetargetedTail = false;
   constructor(options) {
     super(options.onUpdate, options.scheduler);
     this.name = options.name;
@@ -763,22 +813,27 @@ var InertiaItem = class extends PhysicsItem {
     if (typeof this.from === "number") {
       const projected = projectFling(this.from, numericVelocity(this.initialVelocity) * power, tau);
       const modified = options.modifyTarget?.(projected) ?? projected;
+      if (!Number.isFinite(modified)) throw new Error("Inertia target must be a finite number");
+      if (modified !== projected) this.retargetedVelocity = (modified - this.from) / tau;
       this.target = modified;
       const bound = modified < (options.min ?? -Infinity) ? options.min : modified > (options.max ?? Infinity) ? options.max : void 0;
-      if (bound != null && options.bounce !== false) {
+      if (bound != null) {
         this.boundary = bound;
+        this.target = bound;
+        const effectiveVelocity = this.retargetedVelocity ?? numericVelocity(this.initialVelocity) * power;
         const distance = bound - this.from;
-        const full = numericVelocity(this.initialVelocity) * power * tau;
+        const full = effectiveVelocity * tau;
         const ratio = full === 0 ? 1 : Math.max(0, Math.min(0.999999, distance / full));
         this.crossingTime = Math.max(0, -tau * Math.log(1 - ratio));
-        const crossingVelocity = numericVelocity(this.initialVelocity) * power * Math.exp(-this.crossingTime / tau);
-        this.settle = new SpringItem({ from: bound, to: bound, velocity: crossingVelocity, ...typeof options.bounce === "object" ? options.bounce : {}, scheduler: options.scheduler });
+        const crossingVelocity = effectiveVelocity * Math.exp(-this.crossingTime / tau);
+        if (options.bounce !== false) this.settle = new SpringItem({ from: bound, to: bound, velocity: crossingVelocity, ...typeof options.bounce === "object" ? options.bounce : {}, scheduler: options.scheduler });
       }
     } else this.target = this.from;
     const rest = Math.max(1e-5, options.restDelta ?? 0.01);
-    const v = Math.abs(numericVelocity(this.initialVelocity) * power);
-    const decayDuration = v <= rest ? 0 : Math.max(0, tau * Math.log(v / rest));
-    this.totalDuration = this.settle ? this.crossingTime + this.settle.totalDuration : decayDuration;
+    const v = Math.abs(this.retargetedVelocity ?? numericVelocity(this.initialVelocity) * power);
+    this.decayTime = v <= rest ? 0 : Math.max(0, tau * Math.log(v / rest));
+    this.hasRetargetedTail = this.retargetedVelocity !== void 0 && this.boundary === void 0 && v > 0;
+    this.totalDuration = this.settle ? this.crossingTime + this.settle.totalDuration : this.boundary !== void 0 ? this.crossingTime : this.decayTime + (this.hasRetargetedTail ? 2 * tau : 0);
     if (options.autoplay) queueMicrotask(() => this.play());
   }
   sampleAt(milliseconds) {
@@ -787,17 +842,23 @@ var InertiaItem = class extends PhysicsItem {
       this.apply?.(this.value, this.velocity, time);
       return this.value;
     }
-    if (this.settle && this.boundary != null && time >= this.crossingTime) {
+    if (time >= this.totalDuration) {
+      this.value = this.target;
+      this.velocity = 0;
+    } else if (this.settle && this.boundary != null && time >= this.crossingTime) {
       this.value = this.settle.sampleAt(time - this.crossingTime);
       this.velocity = this.settle.velocity;
     } else {
       const tau = Math.max(1, this.options.timeConstant ?? 325);
-      const v0 = numericVelocity(this.initialVelocity) * (this.options.power ?? 0.8);
-      this.value = this.from + v0 * tau * (1 - Math.exp(-time / tau));
-      this.velocity = v0 * Math.exp(-time / tau);
-      if (!this.settle && time >= this.totalDuration) {
-        this.value = this.target;
-        this.velocity = 0;
+      const v0 = this.retargetedVelocity ?? numericVelocity(this.initialVelocity) * (this.options.power ?? 0.8);
+      if (this.hasRetargetedTail && time >= this.decayTime) {
+        const remaining = 1 - (time - this.decayTime) / (2 * tau);
+        const tailVelocity = v0 * Math.exp(-this.decayTime / tau);
+        this.value = this.target - tailVelocity * tau * remaining * remaining;
+        this.velocity = tailVelocity * remaining;
+      } else {
+        this.value = this.from + v0 * tau * (1 - Math.exp(-time / tau));
+        this.velocity = v0 * Math.exp(-time / tau);
       }
     }
     this.apply?.(this.value, this.velocity, time);
@@ -892,6 +953,7 @@ var Tween = class {
   value = this.from;
   progress = 0;
   elapsed = 0;
+  sampledTime = 0;
   durationInput = 300;
   delayInput = 0;
   repeatDelayInput = 0;
@@ -983,8 +1045,8 @@ var Tween = class {
     const active = Math.max(0, this.elapsed - this.delay);
     this.isReversed = !this.isReversed;
     if (this.repeat === Infinity) {
-      const cycleDuration = Math.max(1, this.duration + this.repeatDelay);
-      const iteration = Math.floor(active / cycleDuration);
+      const cycleDuration = this.duration + this.repeatDelay;
+      const iteration = cycleDuration > 0 ? Math.floor(active / cycleDuration) : 0;
       const cycleTime = Math.min(this.duration, Math.max(0, active - iteration * cycleDuration));
       this.elapsed = this.delay + iteration * cycleDuration + Math.max(0, this.duration - cycleTime);
     } else this.elapsed = this.delay + Math.max(0, this.activeDuration - active);
@@ -1031,15 +1093,23 @@ var Tween = class {
   getCurrentFrame(fps = 60) {
     return this.frameAt(fps);
   }
-  /** Analytic/numerically differentiated velocity of the current tween value, in units per millisecond. */
+  /** Derivative for increasing sampled local time, in units/ms; stationary phases return zero. */
   instantaneousVelocity() {
-    if (this.duration <= 0) return 0;
+    if (!(this.duration > 0) || !Number.isFinite(this.duration) || this.sampledTime < this.delay || this.sampledTime >= this.totalDuration) return 0;
+    const { active, iteration } = sampleCycle(
+      { duration: this.duration, delay: this.delay, repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction, reversed: this.isReversed },
+      this.sampledTime
+    );
+    if (active - iteration * (this.duration + this.repeatDelay) >= this.duration) return 0;
+    const alternating = this.direction === "alternate" || this.direction === "alternate-reverse";
+    const startsReverse = this.direction === "reverse" || this.direction === "alternate-reverse";
+    const reversed = startsReverse !== (alternating && iteration % 2 === 1) !== this.isReversed;
     const epsilon = 1e-4;
     const before = this.easing(Math.max(0, this.progress - epsilon));
     const after = this.easing(Math.min(1, this.progress + epsilon));
     const span = Math.min(1, this.progress + epsilon) - Math.max(0, this.progress - epsilon);
     const slope = span > 0 ? (after - before) / span : 0;
-    return scaleVelocity(velocityBetween(this.from, this.toValue, this.duration), slope);
+    return scaleVelocity(velocityBetween(this.from, this.toValue, this.duration), reversed ? -slope : slope);
   }
   /**
    * A two-keyframe `Track` equivalent to this tween's `from`/`to`/`duration`/`easing`/`repeat`/`repeatDelay`/`direction`.
@@ -1065,6 +1135,7 @@ var Tween = class {
     return this.delay + this.activeDuration;
   }
   sampleAt(milliseconds, _ctx) {
+    this.sampledTime = milliseconds;
     const { progress } = sampleCycle(
       { duration: this.duration, delay: this.delay, repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction, reversed: this.isReversed },
       milliseconds
@@ -1261,6 +1332,9 @@ var Transport = class {
   explicitDuration;
   removeFrame;
   outputs = /* @__PURE__ */ new Set();
+  offlineActive = false;
+  offlineFirstFrame = false;
+  offlineInvalidated = false;
   pendingCues = null;
   listeners = /* @__PURE__ */ new Set();
   loopListeners = /* @__PURE__ */ new Set();
@@ -1305,6 +1379,7 @@ var Transport = class {
     return this;
   }
   attach(output) {
+    if (this.offlineActive && output.supportsOffline === false) throw new Error("Cannot attach a live output during offline rendering.");
     this.outputs.add(output);
     output.onAttach?.(this);
     return () => {
@@ -1331,6 +1406,7 @@ var Transport = class {
     return trace;
   }
   play() {
+    if (this.offlineActive) throw new Error("Cannot play a transport while an offline render is active.");
     if (this._state === "playing") return this;
     if (this._state === "finished") {
       this._time = this._rate >= 0 ? 0 : this.boundedDuration();
@@ -1365,9 +1441,10 @@ var Transport = class {
     return this._state === "playing" ? this.pause() : this.play();
   }
   seek(to, options = {}) {
+    if (this.offlineActive && this.offlineInvalidated) throw new Error("The transport was disposed during offline rendering.");
     let target = Math.max(0, Math.min(this.duration, parseTime(to, this.frameRate)));
     if (!Number.isFinite(target)) return this;
-    if (this.loopRegion && target === this.loopRegion[1]) {
+    if (!this.offlineActive && this.loopRegion && target === this.loopRegion[1]) {
       const [a, b] = this.loopRegion;
       const carriedCues = this.renderAt(b, options.cues !== "skip", { emit: false, direction: 1 });
       this.fireLoop();
@@ -1445,9 +1522,30 @@ var Transport = class {
   }
   /** Manually drive the transport from an absolute clock value. Used by offline rendering and tests. */
   tick(now2) {
+    if (this.offlineActive) throw new Error("Cannot tick a transport while an offline render is active.");
     this.advance(now2);
   }
+  /** Acquire exclusive offline clock ownership. Release in finally; capture may
+   * await, but playback and another export cannot restart this clock meanwhile.
+   * Callers must still avoid mutating/explicitly seeking the graph during capture.
+   */
+  beginOffline() {
+    if (this._state === "playing") throw new Error("Pause the playing transport before offline rendering.");
+    if (this.offlineActive) throw new Error("An offline render is already active on this transport.");
+    if ([...this.outputs].some((output) => output.supportsOffline === false)) throw new Error("Detach live outputs before offline rendering.");
+    this.offlineActive = true;
+    this.offlineFirstFrame = true;
+    this.offlineInvalidated = false;
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        this.offlineActive = false;
+      }
+    };
+  }
   dispose() {
+    if (this.offlineActive) this.offlineInvalidated = true;
     this.removeFrame?.();
     this.removeFrame = void 0;
     if (this._state === "playing") this._state = "paused";
@@ -1502,8 +1600,9 @@ var Transport = class {
   }
   renderAt(time, fireCues, options = {}) {
     const quantized = this.snap ? this.frameSnap(time) : time;
-    const direction = options.direction ?? (quantized >= this.lastRenderedTime ? 1 : -1);
-    const delta = quantized - this.lastRenderedTime;
+    const direction = options.direction ?? (this.offlineActive || quantized >= this.lastRenderedTime ? 1 : -1);
+    const delta = this.offlineActive && this.offlineFirstFrame ? 0 : quantized - this.lastRenderedTime;
+    this.offlineFirstFrame = false;
     this._time = quantized;
     const info = {
       time: quantized,
@@ -1580,6 +1679,7 @@ var Timeline = class _Timeline {
   name;
   options;
   entries = [];
+  authoredPlacements = [];
   labels = /* @__PURE__ */ new Map();
   cursor = 0;
   /** The furthest a marker/cue/region reaches; a cue-only timeline (no content) still has a real, sampleable duration. */
@@ -1644,17 +1744,39 @@ var Timeline = class _Timeline {
   /** Adopt a containing timeline/transport timebase and remeasure every descendant item. Explicit timeline rates still win. */
   bindFrameRate(rate) {
     this.inheritedRateInput = rate;
-    for (const entry of this.entries) {
-      entry.item.bindFrameRate?.(this.frameRate);
-      entry.end = entry.start + entry.item.totalDuration;
+    const labels = /* @__PURE__ */ new Map();
+    let previous;
+    let cursor = 0;
+    let markerCursor = 0;
+    for (const operation of this.authoredPlacements) {
+      if (operation.kind === "item") {
+        const { entry } = operation;
+        entry.item.bindFrameRate?.(this.frameRate);
+        entry.start = this.resolvePosition(operation.at, previous, labels);
+        entry.end = entry.start + entry.item.totalDuration;
+        cursor = Math.max(cursor, entry.end);
+        previous = entry;
+      } else if (operation.kind === "marker") {
+        const time = this.resolvePosition(operation.at ?? cursor, previous, labels);
+        labels.set(operation.name, time);
+        markerCursor = Math.max(markerCursor, time);
+      } else if (operation.kind === "cue") {
+        operation.point.time = this.resolvePosition(operation.at, previous, labels);
+        markerCursor = Math.max(markerCursor, operation.point.time);
+      } else {
+        operation.start.time = this.resolvePosition(operation.from, previous, labels);
+        operation.end.time = this.resolvePosition(operation.to, previous, labels);
+        markerCursor = Math.max(markerCursor, operation.start.time, operation.end.time);
+      }
     }
-    this.cursor = this.entries.reduce((max, entry) => Math.max(max, entry.end), 0);
+    this.labels = labels;
+    this.cursor = cursor;
+    this.markerCursor = markerCursor;
+    this.points = this.authoredPlacements.flatMap((entry) => entry.kind === "cue" ? [entry.point] : entry.kind === "region" ? [entry.start, entry.end] : []);
+    this.points.sort((a, b) => a.time - b.time);
   }
-  label(name, at = this.cursor) {
-    const time = this.resolvePosition(at, this.entries.at(-1));
-    this.labels.set(name, time);
-    this.markerCursor = Math.max(this.markerCursor, time);
-    return this;
+  label(name, at) {
+    return this.marker(name, at);
   }
   add(item, at) {
     if (item instanceof _Timeline) {
@@ -1663,13 +1785,15 @@ var Timeline = class _Timeline {
       }
       if (item.parentTimeline) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ""} is already attached to another timeline.`);
       if (item.ownTransport) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ""} already has its own transport (it was played directly); nest it before playing it.`);
-      item.parentTimeline = this;
     }
-    if (this.explicitRateInput !== void 0 || this.inheritedRateInput !== void 0) item.bindFrameRate?.(this.frameRate);
     const previous = this.entries.at(-1);
     const start = this.resolvePosition(at, previous);
+    if (this.explicitRateInput !== void 0 || this.inheritedRateInput !== void 0) item.bindFrameRate?.(this.frameRate);
     const end = start + item.totalDuration;
-    this.entries.push({ item, start, end });
+    const entry = { item, start, end };
+    if (item instanceof _Timeline) item.parentTimeline = this;
+    this.entries.push(entry);
+    this.authoredPlacements.push({ kind: "item", entry, at });
     this.cursor = Math.max(this.cursor, end);
     return this;
   }
@@ -1684,7 +1808,8 @@ var Timeline = class _Timeline {
   remove(item) {
     const index = this.entries.findIndex((entry) => entry.item === item);
     if (index === -1) return this;
-    this.entries.splice(index, 1);
+    const [removed] = this.entries.splice(index, 1);
+    this.authoredPlacements = this.authoredPlacements.filter((operation) => operation.kind !== "item" || operation.entry !== removed);
     if (item instanceof _Timeline && item.parentTimeline === this) item.parentTimeline = void 0;
     this.cursor = this.entries.reduce((max, entry) => Math.max(max, entry.end), 0);
     return this;
@@ -1692,6 +1817,7 @@ var Timeline = class _Timeline {
   clear() {
     for (const entry of this.entries) if (entry.item instanceof _Timeline && entry.item.parentTimeline === this) entry.item.parentTimeline = void 0;
     this.entries = [];
+    this.authoredPlacements = [];
     this.labels.clear();
     this.markerMeta.clear();
     this.points = [];
@@ -1708,16 +1834,19 @@ var Timeline = class _Timeline {
   get cues() {
     return this.points.map((p) => ({ name: p.name, time: p.time })).sort((a, b) => a.time - b.time);
   }
-  marker(name, at = this.cursor, options = {}) {
-    const time = this.resolvePosition(at, this.entries.at(-1));
+  marker(name, at, options = {}) {
+    const time = this.resolvePosition(at ?? this.cursor, this.entries.at(-1));
     this.labels.set(name, time);
     this.markerCursor = Math.max(this.markerCursor, time);
     if (options.color != null || options.payload !== void 0) this.markerMeta.set(name, options);
+    this.authoredPlacements.push({ kind: "marker", name, at });
     return this;
   }
   cue(name, at, handler, options = {}) {
     const time = this.resolvePosition(at, this.entries.at(-1));
-    this.insertPoint({ name, time, payload: options.payload, once: options.once ?? false, fired: false, onForward: handler, onBackward: handler });
+    const point = { name, time, payload: options.payload, once: options.once ?? false, fired: false, onForward: handler, onBackward: handler };
+    this.insertPoint(point);
+    this.authoredPlacements.push({ kind: "cue", point, at });
     return this;
   }
   region(name, from, to, options = {}) {
@@ -1726,9 +1855,20 @@ var Timeline = class _Timeline {
     const toTime = this.resolvePosition(to, previous);
     const payload = options.payload;
     const once = options.once ?? false;
-    this.insertPoint({ name, time: fromTime, payload, once, fired: false, onForward: options.onEnter, onBackward: options.onExit });
-    this.insertPoint({ name, time: toTime, payload, once, fired: false, onForward: options.onExit, onBackward: options.onEnter });
+    const start = { name, time: fromTime, payload, once, fired: false, onForward: options.onEnter, onBackward: options.onExit };
+    const end = { name, time: toTime, payload, once, fired: false, onForward: options.onExit, onBackward: options.onEnter };
+    this.insertPoint(start);
+    this.insertPoint(end);
+    this.authoredPlacements.push({ kind: "region", start, end, from, to });
     return this;
+  }
+  /** Serializable cue/region metadata without flattening regions into two cues. Handlers are deliberately excluded. */
+  serializationMetadata() {
+    const payload = (point) => ({ ...point.once ? { once: true } : {}, ...point.payload !== void 0 ? { payload: point.payload } : {} });
+    return {
+      cues: this.authoredPlacements.flatMap((entry) => entry.kind === "cue" ? [{ name: entry.point.name, at: entry.point.time, ...payload(entry.point) }] : []),
+      regions: this.authoredPlacements.flatMap((entry) => entry.kind === "region" ? [{ name: entry.start.name, from: entry.start.time, to: entry.end.time, ...payload(entry.start) }] : [])
+    };
   }
   insertPoint(point) {
     const index = this.points.findIndex((existing) => existing.time > point.time);
@@ -1912,6 +2052,28 @@ var Timeline = class _Timeline {
     for (const point of this.points) point.fired = false;
     for (const entry of this.entries) entry.item.reset?.();
   }
+  /** Reset cue state for a fresh inclusive offline range without sampling values
+   * or invoking update/completion handlers during crossing-history preparation.
+   */
+  resetBefore(localMs) {
+    this.reset();
+    if (localMs > 0) this.primeCrossings(localMs - Math.max(1e-7, Math.abs(localMs) * Number.EPSILON * 2));
+  }
+  primeCrossings(localMs) {
+    if (localMs < 0) return;
+    const { cycleTime, iteration } = sampleCycle({
+      duration: this.duration,
+      delay: 0,
+      repeat: this.options.repeat ?? 0,
+      repeatDelay: this.repeatDelay,
+      direction: this.options.yoyo ? "alternate" : "normal",
+      reversed: false
+    }, localMs);
+    const contentTime = this.iterationReversed(iteration) && Number.isFinite(this.duration) ? this.duration - cycleTime : cycleTime;
+    this.lastCycleTime = contentTime;
+    this.lastIteration = iteration;
+    for (const entry of this.entries) if (entry.item instanceof _Timeline) entry.item.primeCrossings(contentTime - entry.start);
+  }
   iterationReversed(iteration) {
     return this.options.yoyo === true && iteration % 2 === 1;
   }
@@ -1960,7 +2122,7 @@ var Timeline = class _Timeline {
     }
   }
   // ---- positions --------------------------------------------------------
-  resolvePosition(at, previous) {
+  resolvePosition(at, previous, labels = this.labels) {
     if (at == null) return previous?.end ?? 0;
     if (typeof at === "number") return Math.max(0, at);
     const text = at.trim();
@@ -1974,7 +2136,7 @@ var Timeline = class _Timeline {
     if (TIME_LITERAL_RE.test(text)) return Math.max(0, parseTime(text, this.frameRate));
     const labelMatch = text.match(LABEL_OFFSET_RE);
     const labelName = labelMatch ? labelMatch[1] : text;
-    const base = this.labels.get(labelName);
+    const base = labels.get(labelName);
     if (base == null) throw new Error(`Unknown timeline label: ${at}`);
     if (!labelMatch) return Math.max(0, base);
     return Math.max(0, base + parseTime(labelMatch[3], this.frameRate) * (labelMatch[2] === "+=" ? 1 : -1));
@@ -1991,8 +2153,14 @@ var OfflineTransport = class extends Transport {
   }
 };
 function resolveOfflineTransport(source, options) {
-  if (source instanceof Transport) return source;
-  return new OfflineTransport({ root: source, frameRate: options.frameRate ?? source.frameRate });
+  if (source instanceof Timeline && source.parent) throw new Error("Offline rendering requires a root timeline, not a nested child.");
+  const transport = source instanceof Transport ? source : source.rootTransport ?? new OfflineTransport({ root: source, frameRate: options.frameRate ?? source.frameRate });
+  if (options.frameRate !== void 0) {
+    const rate = frameRate(options.frameRate);
+    if (rate.num !== transport.frameRate.num || rate.den !== transport.frameRate.den || rate.dropFrame !== transport.frameRate.dropFrame)
+      throw new Error("Offline frame rate must match the owning transport frame rate. Create a fresh source to export at another rate.");
+  }
+  return transport;
 }
 var warnedOffline = /* @__PURE__ */ new WeakSet();
 function attachForOffline(transport, output, doAttach = (o) => transport.attach(o)) {
@@ -2010,22 +2178,32 @@ function resolveRange(transport, rate, options) {
   const from = options.from != null ? parseTime(options.from, rate) : 0;
   const to = options.to != null ? parseTime(options.to, rate) : transport.duration;
   if (!Number.isFinite(to)) throw new Error("renderFrames/frames: the transport has an infinite duration; pass an explicit `to`.");
+  if (!Number.isFinite(from) || from < 0 || to < from || to > transport.duration) throw new Error("renderFrames/frames: range must be finite, non-negative, ordered, and within the transport duration.");
+  if (!Number.isSafeInteger(msToFrame(from, rate)) || !Number.isSafeInteger(msToFrame(to, rate))) throw new Error("renderFrames/frames: range exceeds safe integer frame indices.");
   return { from, to };
+}
+var sampledOffline = /* @__PURE__ */ new WeakSet();
+function prepareRange(transport, from, startTime) {
+  if (from <= 0 || !sampledOffline.has(transport)) {
+    transport.root.resetBefore(startTime);
+  }
+  sampledOffline.add(transport);
 }
 async function renderFrames(source, onFrame, options = {}) {
   const transport = resolveOfflineTransport(source, options);
   const rate = options.frameRate ? frameRate(options.frameRate) : transport.frameRate;
   const { from, to } = resolveRange(transport, rate, options);
-  const detachers = (options.outputs ?? []).map((output) => attachForOffline(transport, output));
+  const release = transport.beginOffline();
+  const detachers = [];
   let latest;
   const unsubscribe = transport.subscribe((info) => {
     latest = info;
   });
   try {
-    if (from <= 0) transport.root.reset?.();
-    transport.seek(from, { cues: "skip" });
+    for (const output of options.outputs ?? []) detachers.push(attachForOffline(transport, output));
     const startFrame = msToFrame(from, rate);
     const endFrame = msToFrame(to, rate);
+    prepareRange(transport, from, frameToMs(startFrame, rate));
     let count = 0;
     for (let frame = startFrame; frame <= endFrame; frame += 1) {
       if (options.signal?.aborted) break;
@@ -2040,28 +2218,42 @@ async function renderFrames(source, onFrame, options = {}) {
     return { frames: count, from, to };
   } finally {
     unsubscribe();
-    for (const detach of detachers) detach();
+    const errors = [];
+    try {
+      for (const detach of detachers) {
+        try {
+          detach();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+    } finally {
+      release();
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, "Offline output cleanup failed.");
   }
 }
 function* frames(source, options = {}) {
   const transport = resolveOfflineTransport(source, options);
   const rate = options.frameRate ? frameRate(options.frameRate) : transport.frameRate;
   const { from, to } = resolveRange(transport, rate, options);
+  const release = transport.beginOffline();
   let latest;
   const unsubscribe = transport.subscribe((info) => {
     latest = info;
   });
   try {
-    if (from <= 0) transport.root.reset?.();
-    transport.seek(from, { cues: "skip" });
     const startFrame = msToFrame(from, rate);
     const endFrame = msToFrame(to, rate);
+    prepareRange(transport, from, frameToMs(startFrame, rate));
     for (let frame = startFrame; frame <= endFrame; frame += 1) {
       transport.seek(frameToMs(frame, rate), { cues: "fire" });
       yield latest;
     }
   } finally {
     unsubscribe();
+    release();
   }
 }
 
@@ -2119,14 +2311,20 @@ function signalOutput(send, options = {}) {
 
 // src/sheet.ts
 var targetKeys = /* @__PURE__ */ new WeakMap();
+var authoredSheets = /* @__PURE__ */ new WeakMap();
+function cloneAuthored(value, freeze = false) {
+  if (!value || typeof value !== "object") return value;
+  const copy = Array.isArray(value) ? value.map((entry) => cloneAuthored(entry, freeze)) : Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, cloneAuthored(entry, freeze)]));
+  return freeze ? Object.freeze(copy) : copy;
+}
 function resolveEasingWithBindings(input, easings) {
   if (input == null) return void 0;
-  if (typeof input === "string" && easings?.[input]) return easings[input];
+  if (typeof input === "string" && easings && Object.hasOwn(easings, input)) return easings[input];
   return resolveEasing(input);
 }
 function resolveTarget(key, bindings, strict, path) {
   if (key == null) return void 0;
-  const target = bindings.targets?.[key];
+  const target = bindings.targets && Object.hasOwn(bindings.targets, key) ? bindings.targets[key] : void 0;
   if (target == null) {
     const message = `${path}: unknown target "${key}"`;
     if (strict) throw new Error(message);
@@ -2161,10 +2359,10 @@ function buildItem(item, bindings, strict, path, rate) {
     const track2 = new Track({
       name: track_.name,
       frameRate: rate,
-      keyframes: track_.keyframes.map((k) => ({ at: k.at, value: k.value, easing: k.easing })),
+      keyframes: track_.keyframes.map((k) => ({ at: k.at, value: k.value, easing: resolveEasingWithBindings(k.easing, bindings.easings) })),
       repeat: track_.repeat,
       repeatDelay: track_.repeatDelay,
-      direction: track_.direction === "alternate" ? "alternate" : "normal",
+      direction: track_.direction ?? "normal",
       easing: resolveEasingWithBindings(track_.easing, bindings.easings),
       apply: write ?? (() => {
       })
@@ -2232,17 +2430,24 @@ function buildTimeline(sheet, bindings, strict, path, inheritedRate) {
   return timeline;
 }
 function loadSheet(sheet, bindings = {}, options = {}) {
+  if (typeof sheet === "string" && sheet.length > (options.limits?.maxStringLength ?? DEFAULT_SHEET_LIMITS.maxStringLength)) throw new Error("loadSheet: input exceeds maxStringLength");
   const parsed = typeof sheet === "string" ? JSON.parse(sheet) : sheet;
   const strict = options.strict ?? true;
-  const validated = validateSheet(parsed);
+  const validated = validateSheet(parsed, { limits: options.limits, easings: bindings.easings, allowExtensions: Boolean(bindings.createItem) || !strict });
   if (!validated.ok) {
     const message = validated.errors.map((e) => `${e.path}: ${e.message}`).join("\n");
     throw new Error(`loadSheet: invalid cue sheet:
 ${message}`);
   }
-  return buildTimeline(parsed, bindings, strict, "$", void 0);
+  const snapshot = cloneAuthored(parsed, true);
+  const timeline = buildTimeline(cloneAuthored(snapshot), bindings, strict, "$", void 0);
+  authoredSheets.set(timeline, snapshot);
+  return timeline;
 }
-function saveSheet(timeline) {
+function saveSheet(timeline, options = {}) {
+  const authored = authoredSheets.get(timeline);
+  if (options.source !== "runtime" && authored) return cloneAuthored(authored);
+  const metadata = timeline.serializationMetadata();
   return {
     $schema: "dhaakon-motion/cue-sheet/1",
     ...timeline.name ? { name: timeline.name } : {},
@@ -2251,23 +2456,19 @@ function saveSheet(timeline) {
     ...timeline.options.repeatDelay ? { repeatDelay: timeline.options.repeatDelay } : {},
     ...timeline.options.yoyo ? { direction: "alternate" } : {},
     ...timeline.markers.length ? { markers: timeline.markers.map((m) => ({ name: m.name, at: m.time, ...m.color ? { color: m.color } : {}, ...m.payload !== void 0 ? { payload: m.payload } : {} })) } : {},
-    ...timeline.cues.length ? { cues: timeline.cues.map((c) => ({ name: c.name, at: c.time })) } : {},
+    ...metadata.cues.length ? { cues: metadata.cues } : {},
+    ...metadata.regions.length ? { regions: metadata.regions } : {},
     items: timeline.items.map(({ item, start }) => saveItem(item, start))
   };
 }
 function saveItem(item, at) {
   const target = targetKeys.get(item);
   if (item instanceof Timeline) {
+    const { $schema: _, ...nested } = saveSheet(item, { source: "runtime" });
     return {
+      ...nested,
       type: "timeline",
-      ...item.name ? { name: item.name } : {},
-      at,
-      frameRate: item.frameRate,
-      ...item.options.repeat ? { repeat: item.options.repeat } : {},
-      ...item.options.yoyo ? { direction: "alternate" } : {},
-      ...item.markers.length ? { markers: item.markers.map((m) => ({ name: m.name, at: m.time })) } : {},
-      ...item.cues.length ? { cues: item.cues.map((c) => ({ name: c.name, at: c.time })) } : {},
-      items: item.items.map((entry) => saveItem(entry.item, entry.start))
+      at
     };
   }
   if (item instanceof Tween) {
@@ -2292,7 +2493,7 @@ function saveItem(item, at) {
       ...item.name ? { name: item.name } : {},
       at,
       ...target ? { target } : {},
-      keyframes: item.keyframes.map((k) => ({ at: k.at, value: k.value }))
+      ...item.serializationOptions()
     };
   }
   if (item instanceof SpringItem) {
@@ -2305,89 +2506,268 @@ function saveItem(item, at) {
   }
   return { type: item.kind, ...item.name ? { name: item.name } : {}, at };
 }
-function validateSheet(input) {
+var DEFAULT_SHEET_LIMITS = Object.freeze({ maxDepth: 32, maxNodes: 2e5, maxItems: 1e4, maxKeyframes: 1e5, maxStringLength: 1e6 });
+function validateSheet(input, options = {}) {
   const errors = [];
-  const push = (path, message) => errors.push({ path, message });
-  if (typeof input !== "object" || input === null) {
-    push("$", "must be an object");
-    return { ok: false, errors };
+  const push = (path, message) => {
+    if (errors.length < 50) errors.push({ path, message });
+  };
+  const limits = { ...DEFAULT_SHEET_LIMITS, ...options.limits };
+  for (const [name, value] of Object.entries(limits)) {
+    if (!Number.isSafeInteger(value) || value < 1) push(`$.limits.${name}`, "must be a positive safe integer");
   }
-  const sheet = input;
-  if (sheet.$schema !== "dhaakon-motion/cue-sheet/1") push("$.$schema", 'must be "dhaakon-motion/cue-sheet/1"');
-  if (sheet.frameRate != null) {
-    try {
-      frameRate(sheet.frameRate);
-    } catch (err) {
-      push("$.frameRate", err.message);
+  if (errors.length) return { ok: false, errors };
+  const isRecord = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+  const ancestors = /* @__PURE__ */ new Set();
+  let nodes = 0;
+  let characters = 0;
+  const preflight = (value, path, depth) => {
+    if (errors.length) return;
+    if (++nodes > limits.maxNodes || depth > limits.maxDepth) {
+      push(path, "exceeds maxNodes or maxDepth");
+      return;
     }
-  }
-  if (!Array.isArray(sheet.items)) push("$.items", "must be an array");
-  else sheet.items.forEach((item, index) => validateItem(item, `$.items[${index}]`, push));
-  for (const label of ["markers", "cues"]) {
-    const list = sheet[label];
-    if (list != null && !Array.isArray(list)) push(`$.${label}`, "must be an array");
-  }
-  return errors.length ? { ok: false, errors } : { ok: true, sheet };
-}
-function validateEasing(value, path, push) {
-  if (value == null) return;
-  try {
-    resolveEasing(value);
-  } catch (err) {
-    push(path, err.message);
-  }
-}
-function validateItem(item, path, push) {
-  if (typeof item !== "object" || item === null) {
-    push(path, "must be an object");
-    return;
-  }
-  const value = item;
-  if (typeof value.type !== "string") {
-    push(`${path}.type`, "is required");
-    return;
-  }
-  if (value.type === "tween") {
-    if (value.from === void 0) push(`${path}.from`, "is required");
-    if (value.to === void 0) push(`${path}.to`, "is required");
-    validateEasing(value.easing, `${path}.easing`, push);
-  } else if (value.type === "track") {
-    if (!Array.isArray(value.keyframes) || value.keyframes.length === 0) push(`${path}.keyframes`, "must be a non-empty array");
-    else {
-      let lastNumeric;
-      value.keyframes.forEach((keyframe, index) => {
-        if (typeof keyframe !== "object" || keyframe === null) {
-          push(`${path}.keyframes[${index}]`, "must be an object");
+    if (typeof value === "string") {
+      characters += value.length;
+      if (characters > limits.maxStringLength) push(path, "exceeds maxStringLength");
+      return;
+    }
+    if (typeof value === "number") {
+      if (!Number.isFinite(value) && !(/^\$(?:\.items\[\d+\])*\.repeat$/.test(path) && value === Infinity)) push(path, "must be finite");
+      return;
+    }
+    if (typeof value === "function") {
+      if (!path.endsWith(".easing")) push(path, "functions are only supported as host easings");
+      return;
+    }
+    if (typeof value === "bigint" || typeof value === "symbol") {
+      push(path, "must be JSON-compatible data");
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    if (ancestors.has(value)) {
+      push(path, "cyclic data is not supported");
+      return;
+    }
+    if (!Array.isArray(value) && ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
+      push(path, "must be a plain data object");
+      return;
+    }
+    if (Array.isArray(value) && value.length > limits.maxNodes - nodes) {
+      push(path, "exceeds maxNodes");
+      return;
+    }
+    const keys = Reflect.ownKeys(value).filter((key) => !(Array.isArray(value) && key === "length"));
+    if (keys.length > limits.maxNodes - nodes) {
+      push(path, "exceeds maxNodes");
+      return;
+    }
+    ancestors.add(value);
+    for (const key of keys) {
+      if (typeof key !== "string") {
+        push(path, "symbol keys are not supported");
+        break;
+      }
+      if (["__proto__", "prototype", "constructor"].includes(key)) {
+        push(`${path}.${key}`, "reserved property is not supported");
+        break;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!("value" in descriptor)) {
+        push(`${path}.${key}`, "accessors are not supported");
+        break;
+      }
+      if (!descriptor.enumerable) {
+        push(`${path}.${key}`, "non-enumerable fields are not supported");
+        break;
+      }
+      preflight(descriptor.value, Array.isArray(value) ? `${path}[${key}]` : `${path}.${key}`, depth + 1);
+      if (errors.length) break;
+    }
+    ancestors.delete(value);
+  };
+  preflight(input, "$", 0);
+  if (errors.length) return { ok: false, errors };
+  if (!isRecord(input)) return { ok: false, errors: [{ path: "$", message: "must be an object" }] };
+  if (input.$schema !== "dhaakon-motion/cue-sheet/1") push("$.$schema", 'must be "dhaakon-motion/cue-sheet/1"');
+  const string = (value, path, required = false) => {
+    if ((required || value !== void 0) && (typeof value !== "string" || !value)) push(path, "must be a non-empty string");
+  };
+  const number = (value, path, minimum = -Infinity) => {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < minimum) push(path, `must be a finite number >= ${minimum}`);
+  };
+  const valueShape = (value, path, optional = false) => {
+    if (value === void 0 && optional) return;
+    if (typeof value === "number" || typeof value === "string" || typeof value === "boolean") return;
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => valueShape(entry, `${path}[${index}]`));
+      return;
+    }
+    if (isRecord(value)) {
+      Object.entries(value).forEach(([key, entry]) => valueShape(entry, `${path}.${key}`, true));
+      return;
+    }
+    push(path, "must be a motion value (number, string, boolean, array or object)");
+  };
+  const easing = (value, path) => {
+    if (value === void 0) return;
+    if (!(typeof value === "function" || typeof value === "string" && value.length || Array.isArray(value))) {
+      push(path, "must be an easing name, function or descriptor");
+      return;
+    }
+    if (typeof value === "string" && options.easings && Object.hasOwn(options.easings, value)) {
+      if (typeof options.easings[value] !== "function") push(path, "bound easing must be a function");
+      return;
+    }
+    try {
+      resolveEasing(value);
+    } catch (error) {
+      push(path, error.message);
+    }
+  };
+  const time = (value, path, rate) => {
+    try {
+      if (typeof value !== "number" && typeof value !== "string") throw new Error("must be a time value");
+      const resolved = parseTime(value, rate);
+      if (!Number.isFinite(resolved) || resolved < 0) throw new Error("must be a finite non-negative time");
+      return resolved;
+    } catch (error) {
+      push(path, error.message);
+      return 0;
+    }
+  };
+  let itemCount = 0;
+  let keyCount = 0;
+  const timeline = (sheet, path, inherited) => {
+    let rate = frameRate(inherited);
+    if (sheet.frameRate !== void 0) {
+      try {
+        if (isRecord(sheet.frameRate) && sheet.frameRate.dropFrame !== void 0 && typeof sheet.frameRate.dropFrame !== "boolean") throw new Error("dropFrame must be boolean");
+        const candidate = frameRate(sheet.frameRate);
+        if (!Number.isFinite(candidate.fps) || candidate.fps <= 0 || !Number.isSafeInteger(candidate.num) || !Number.isSafeInteger(candidate.den) || candidate.num <= 0 || candidate.den <= 0) throw new Error("invalid frame rate");
+        rate = candidate;
+      } catch (error) {
+        push(`${path}.frameRate`, error.message);
+      }
+    }
+    common(sheet, path, rate, ["normal", "alternate"]);
+    const labels = /* @__PURE__ */ new Map();
+    const position = (value, at) => {
+      if (typeof value !== "string") return time(value, at, rate);
+      try {
+        return timeLiteral(value, rate);
+      } catch {
+      }
+      const match = /^(.+?)(?:([+-]=)(.+))?$/.exec(value.trim());
+      if (!match || !["<", ">"].includes(match[1]) && !labels.has(match[1])) {
+        push(at, `unknown position or label "${value}"`);
+        return 0;
+      }
+      const offset = match[3] ? time(match[3], at, rate) * (match[2] === "-=" ? -1 : 1) : 0;
+      return Math.max(0, (labels.get(match[1]) ?? 0) + offset);
+    };
+    for (const field of ["markers", "cues", "regions"]) {
+      if (sheet[field] === void 0) continue;
+      if (!Array.isArray(sheet[field])) {
+        push(`${path}.${field}`, "must be an array");
+        continue;
+      }
+      sheet[field].forEach((entry, index) => {
+        const at = `${path}.${field}[${index}]`;
+        if (!isRecord(entry)) {
+          push(at, "must be an object");
           return;
         }
-        const kf = keyframe;
-        if (kf.at === void 0) push(`${path}.keyframes[${index}].at`, "is required");
-        if (kf.value === void 0) push(`${path}.keyframes[${index}].value`, "is required");
-        validateEasing(kf.easing, `${path}.keyframes[${index}].easing`, push);
-        if (typeof kf.at === "number") {
-          if (lastNumeric != null && kf.at < lastNumeric) push(`${path}.keyframes[${index}].at`, "keyframes must be in non-decreasing time order");
-          lastNumeric = kf.at;
+        string(entry.name, `${at}.name`, true);
+        if (entry.once !== void 0 && typeof entry.once !== "boolean") push(`${at}.once`, "must be boolean");
+        if (entry.color !== void 0) string(entry.color, `${at}.color`);
+        if (field === "regions") {
+          const from = position(entry.from, `${at}.from`);
+          const to = position(entry.to, `${at}.to`);
+          if (to < from) push(at, "region end must not precede its start");
+        } else {
+          const resolved = position(entry.at, `${at}.at`);
+          if (field === "markers" && typeof entry.name === "string") labels.set(entry.name, resolved);
         }
       });
     }
-    validateEasing(value.easing, `${path}.easing`, push);
-  } else if (value.type === "timeline") {
-    if (value.frameRate != null) {
-      try {
-        frameRate(value.frameRate);
-      } catch (err) {
-        push(`${path}.frameRate`, err.message);
-      }
+    if (!Array.isArray(sheet.items)) {
+      push(`${path}.items`, "must be an array");
+      return;
     }
-    if (!Array.isArray(value.items)) push(`${path}.items`, "must be an array");
-    else value.items.forEach((child, index) => validateItem(child, `${path}.items[${index}]`, push));
-  } else if (value.type === "spring") {
-    if (value.from === void 0) push(`${path}.from`, "is required");
-    if (value.to === void 0) push(`${path}.to`, "is required");
-  } else if (value.type === "inertia") {
-    if (typeof value.from !== "number") push(`${path}.from`, "must be a number");
-    if (typeof value.velocity !== "number") push(`${path}.velocity`, "must be a number");
+    for (let index = 0; index < sheet.items.length; index++) {
+      const item = sheet.items[index];
+      const at = `${path}.items[${index}]`;
+      if (++itemCount > limits.maxItems) {
+        push(at, "exceeds maxItems");
+        break;
+      }
+      if (!isRecord(item)) {
+        push(at, "must be an object");
+        continue;
+      }
+      string(item.type, `${at}.type`, true);
+      if (item.at !== void 0) position(item.at, `${at}.at`);
+      if (item.type === "timeline") {
+        timeline(item, at, rate);
+        continue;
+      }
+      common(item, at, rate, ["normal", "reverse", "alternate", "alternate-reverse"]);
+      if (item.type === "tween" || item.type === "spring") {
+        valueShape(item.from, `${at}.from`);
+        valueShape(item.to, `${at}.to`);
+      } else if (item.type === "track") {
+        if (!Array.isArray(item.keyframes) || !item.keyframes.length) {
+          push(`${at}.keyframes`, "must be a non-empty array");
+          continue;
+        }
+        let previous = -Infinity;
+        for (let k = 0; k < item.keyframes.length; k++) {
+          const key = item.keyframes[k];
+          const keyPath = `${at}.keyframes[${k}]`;
+          if (++keyCount > limits.maxKeyframes) {
+            push(keyPath, "exceeds maxKeyframes");
+            break;
+          }
+          if (!isRecord(key)) {
+            push(keyPath, "must be an object");
+            continue;
+          }
+          const resolved = time(key.at, `${keyPath}.at`, rate);
+          if (resolved < previous) push(`${keyPath}.at`, "keyframes must be in non-decreasing time order");
+          previous = resolved;
+          valueShape(key.value, `${keyPath}.value`);
+          easing(key.easing, `${keyPath}.easing`);
+        }
+      } else if (item.type === "inertia") {
+        number(item.from, `${at}.from`);
+        number(item.velocity, `${at}.velocity`);
+      } else if (!options.allowExtensions) push(`${at}.type`, `unknown item type "${item.type}"; extensions require allowExtensions or a loadSheet factory`);
+      for (const field of ["stiffness", "mass", "timeConstant", "restDelta", "restSpeed"]) if (item[field] !== void 0) {
+        number(item[field], `${at}.${field}`, Number.MIN_VALUE);
+      }
+      for (const field of ["damping", "power"]) if (item[field] !== void 0) number(item[field], `${at}.${field}`, 0);
+      for (const field of ["min", "max", "bounce"]) if (item[field] !== void 0) number(item[field], `${at}.${field}`);
+      if (typeof item.min === "number" && typeof item.max === "number" && item.min > item.max) push(at, "min must not exceed max");
+    }
+  };
+  function timeLiteral(value, rate) {
+    if (typeof value !== "number" && typeof value !== "string") throw new Error("not a time");
+    const resolved = parseTime(value, rate);
+    if (!Number.isFinite(resolved) || resolved < 0) throw new Error("invalid time");
+    return resolved;
   }
+  function common(value, path, rate, directions) {
+    string(value.name, `${path}.name`);
+    string(value.target, `${path}.target`);
+    for (const field of ["duration", "delay", "repeatDelay"]) if (value[field] !== void 0) time(value[field], `${path}.${field}`, rate);
+    if (value.repeat !== void 0 && value.repeat !== Infinity && (!Number.isSafeInteger(value.repeat) || value.repeat < 0)) push(`${path}.repeat`, "must be a non-negative integer or Infinity");
+    if (value.direction !== void 0 && !directions.includes(value.direction)) push(`${path}.direction`, "unsupported direction");
+    if (value.yoyo !== void 0 && typeof value.yoyo !== "boolean") push(`${path}.yoyo`, "must be boolean");
+    easing(value.easing, `${path}.easing`);
+  }
+  timeline(input, "$", 60);
+  return errors.length ? { ok: false, errors } : { ok: true, sheet: input };
 }
 function writerFor(target) {
   return target instanceof MotionValue ? (value) => target.set(value) : target;
@@ -2460,6 +2840,7 @@ function sceneSheet(states, order, options = {}) {
 var src_default = { Tween, Timeline, Transport, Track, Line, MotionValue, animate, stagger, Easing, cubicBezier, spring };
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  DEFAULT_SHEET_LIMITS,
   Easing,
   FrameRates,
   FrameScheduler,
