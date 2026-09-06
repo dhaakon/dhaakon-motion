@@ -1,5 +1,6 @@
-import { M as MotionValue, I as InertiaOptions, P as PhysicsSpringOptions, f as TimeInput, d as Transport } from './track-D8CkFR8E.cjs';
-export { G as GestureRecording, a as GestureSample, g as gestureToTrack, r as record, b as replay } from './record-Gf8hrKsC.cjs';
+import { MotionValue, InertiaOptions, PhysicsSpringOptions, TimeInput, Transport, FrameRateInput, Track } from '@dhaakon/motion';
+import { ManualDriver } from './testing.cjs';
+import '@dhaakon/motion/gesture';
 
 type PointerType = 'mouse' | 'touch' | 'pen';
 interface PointerSample {
@@ -16,6 +17,8 @@ interface PointerSample {
 }
 interface SessionOptions {
     element: Element;
+    /** Attach the element's own pointerdown listener. Disable for handle-only controls. */
+    listen?: boolean;
     capture?: boolean;
     touchAction?: 'auto' | 'none' | 'pan-x' | 'pan-y' | 'manipulation' | 'inherit';
     passive?: boolean;
@@ -29,6 +32,8 @@ interface PointerSession {
     dispose(): void;
     pointers: ReadonlyMap<number, PointerSample[]>;
     preventScroll(active: boolean): void;
+    /** Adopt a pointer that began on another element, such as a drag handle. */
+    start(event: PointerEvent): void;
 }
 declare function createPointerSession(options: SessionOptions): PointerSession;
 
@@ -190,6 +195,8 @@ interface DragOptions {
     keyboard?: boolean;
     step?: number;
     ariaLabel?: string;
+    /** Start when the draggable itself receives pointerdown. Set false for a separate handle. */
+    dragListener?: boolean;
     cues?: {
         at: number | number[];
         name: string;
@@ -252,4 +259,41 @@ declare function hover(element: Element, options?: {
     dispose(): void;
 };
 
-export { type ArenaVerdict, type DragControls, type DragOptions, GestureArena, type GestureEvent, type KeyboardOptions, type LongPressOptions, type PanOptions, type Phase, type Point, type PointerSample, type PointerSession, type PointerType, type Recognizer, type RecognizerSession, type ScrubOptions, type SessionOptions, type TapOptions, type TransformGestureOptions, VelocityEstimator, type VelocityEstimatorOptions, cooperateWithScroll, createGestureArena, createPointerSession, drag, hover, hoverRecognizer, installDragKeyboard, longPressRecognizer, panRecognizer, pinchRecognizer, press, pressRecognizer, rotateRecognizer, scrub, swipeRecognizer, tapRecognizer, transformGesture, wheelRecognizer };
+interface GestureSample {
+    id: number;
+    type: string;
+    kind: 'down' | 'move' | 'up' | 'cancel';
+    x: number;
+    y: number;
+    t: number;
+    pressure?: number;
+}
+interface GestureRecording {
+    $schema: 'dhaakon-motion/gesture/1';
+    frameRate?: FrameRateInput;
+    element?: {
+        width: number;
+        height: number;
+    };
+    samples: GestureSample[];
+}
+declare function record(element: Element, options?: {
+    normalize?: boolean;
+    frameRate?: FrameRateInput;
+}): {
+    stop(): GestureRecording;
+};
+declare function replay(recording: GestureRecording, element: Element, options?: {
+    driver?: ManualDriver;
+    speed?: number;
+    from?: number;
+    to?: number;
+}): Promise<void>;
+declare function gestureToTrack(recording: GestureRecording, options: {
+    pointerId?: number;
+    frameRate: FrameRateInput;
+    axis?: 'x' | 'y' | 'both';
+    simplify?: number;
+}): Track<any>;
+
+export { type ArenaVerdict, type DragControls, type DragOptions, GestureArena, type GestureEvent, type GestureRecording, type GestureSample, type KeyboardOptions, type LongPressOptions, type PanOptions, type Phase, type Point, type PointerSample, type PointerSession, type PointerType, type Recognizer, type RecognizerSession, type ScrubOptions, type SessionOptions, type TapOptions, type TransformGestureOptions, VelocityEstimator, type VelocityEstimatorOptions, cooperateWithScroll, createGestureArena, createPointerSession, drag, gestureToTrack, hover, hoverRecognizer, installDragKeyboard, longPressRecognizer, panRecognizer, pinchRecognizer, press, pressRecognizer, record, replay, rotateRecognizer, scrub, swipeRecognizer, tapRecognizer, transformGesture, wheelRecognizer };

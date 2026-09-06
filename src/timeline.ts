@@ -137,6 +137,9 @@ export class Timeline implements TimelineItem {
 
   add(item: TimelineItem, at?: TimelinePosition): this {
     if (item instanceof Timeline) {
+      for (let ancestor: Timeline | undefined = this; ancestor; ancestor = ancestor.parentTimeline) {
+        if (ancestor === item) throw new Error('A timeline cannot contain itself or an ancestor.');
+      }
       if (item.parentTimeline) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ''} is already attached to another timeline.`);
       if (item.ownTransport) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ''} already has its own transport (it was played directly); nest it before playing it.`);
       item.parentTimeline = this;
@@ -220,7 +223,8 @@ export class Timeline implements TimelineItem {
   seekToMarker(name: string): this {
     const time = this.labels.get(name);
     if (time == null) throw new Error(`Unknown timeline label: ${name}`);
-    this.seek(this.totalDuration ? time / this.totalDuration : 0);
+    const duration = this.seekDuration;
+    this.seek(duration ? time / duration : 0);
     return this;
   }
   nextMarker(fromMs = this.lastCycleTime ?? 0): Marker | undefined {
@@ -317,12 +321,13 @@ export class Timeline implements TimelineItem {
   pause(): this { this.transport.pause(); return this; }
   stop(): this { this.transport.stop(); return this; }
   reverse(): this { this.transport.reverse(); return this; }
-  /** `progress` is a 0..1 fraction of `totalDuration`, matching the pre-0.4 API. */
+  /** `progress` is a 0..1 fraction of finite total duration; an infinite repeat addresses one authored content cycle. */
   seek(progress: number): this {
-    const duration = this.totalDuration;
-    this.transport.seek(Number.isFinite(duration) ? Math.max(0, Math.min(1, progress)) * duration : 0);
+    this.transport.seek(Math.max(0, Math.min(1, progress)) * this.seekDuration);
     return this;
   }
+  /** Infinite repeats seek within one authored content cycle, like `Tween.seek()`. */
+  private get seekDuration() { const total = this.totalDuration; return Number.isFinite(total) ? total : Number.isFinite(this.duration) ? this.duration : 0; }
   loop(value = true): this { this.options.repeat = value ? Infinity : 0; return this; }
 
   // ---- sampling -------------------------------------------------------------
@@ -333,15 +338,21 @@ export class Timeline implements TimelineItem {
       direction: (this.options.yoyo ? 'alternate' : 'normal') as Direction, reversed: false,
     };
     const { cycleTime, iteration, progress } = sampleCycle(spec, localMs);
+    // `cycleTime` is always measured forward within an iteration. Timeline
+    // children and cues need the direction-adjusted content clock instead so
+    // an alternate iteration samples from the end back to the start.
+    const contentTime = this.iterationReversed(iteration) && Number.isFinite(this.duration)
+      ? this.duration - cycleTime
+      : cycleTime;
 
-    if (ctx.fireCues && this.points.length) this.fireCrossings(cycleTime, iteration, ctx);
-    this.lastCycleTime = cycleTime;
+    if (ctx.fireCues && this.points.length) this.fireCrossings(contentTime, iteration, ctx);
+    this.lastCycleTime = contentTime;
     this.lastIteration = iteration;
 
-    for (const entry of this.entries) entry.item.sampleAt(cycleTime - entry.start, ctx);
-    this.options.onUpdate?.(cycleTime, progress);
-    if (progress >= 1 && iteration >= (this.options.repeat ?? 0)) this.options.onComplete?.();
-    return cycleTime;
+    for (const entry of this.entries) entry.item.sampleAt(contentTime - entry.start, ctx);
+    this.options.onUpdate?.(contentTime, progress);
+    if (Number.isFinite(this.totalDuration) && localMs >= this.totalDuration) this.options.onComplete?.();
+    return contentTime;
   }
   /** Alias of `sampleAt` for absolute (not delay-relative) callers, matching the pre-0.4 API. */
   render(time: number) { this.sampleAt(time); }
@@ -357,13 +368,14 @@ export class Timeline implements TimelineItem {
     return this.options.yoyo === true && iteration % 2 === 1;
   }
 
-  private fireCrossings(cycleTime: number, iteration: number, ctx: RenderContext) {
+  private fireCrossings(contentTime: number, iteration: number, ctx: RenderContext) {
     if (this.lastCycleTime == null) {
-      this.fireSegment(ctx.direction >= 0 ? -Infinity : Infinity, cycleTime, ctx);
+      const contentMovesForward = (ctx.direction >= 0) !== this.iterationReversed(iteration);
+      this.fireSegment(contentMovesForward ? -Infinity : Infinity, contentTime, ctx);
       return;
     }
     if (iteration === this.lastIteration) {
-      this.fireSegment(this.lastCycleTime, cycleTime, ctx);
+      this.fireSegment(this.lastCycleTime, contentTime, ctx);
       return;
     }
     const stepDir = iteration > this.lastIteration ? 1 : -1;
@@ -371,12 +383,18 @@ export class Timeline implements TimelineItem {
     let from = this.lastCycleTime;
     let guard = 0;
     while (iter !== iteration && guard++ < 2000) {
-      const tail = this.iterationReversed(iter) ? 0 : this.duration;
-      this.fireSegment(from, tail, ctx);
+      const reversed = this.iterationReversed(iter);
+      const boundary = stepDir > 0
+        ? (reversed ? 0 : this.duration)
+        : (reversed ? this.duration : 0);
+      this.fireSegment(from, boundary, ctx);
       iter += stepDir;
-      from = this.iterationReversed(iter) ? this.duration : 0;
+      const nextReversed = this.iterationReversed(iter);
+      from = stepDir > 0
+        ? (nextReversed ? this.duration : 0)
+        : (nextReversed ? 0 : this.duration);
     }
-    this.fireSegment(from, cycleTime, ctx);
+    this.fireSegment(from, contentTime, ctx);
   }
 
   private fireSegment(fromT: number, toT: number, ctx: RenderContext) {

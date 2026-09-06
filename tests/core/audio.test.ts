@@ -45,6 +45,26 @@ test('pause stops the source', () => {
   expect(context.sources[0].stopped).toBe(true);
 });
 
+test('paused seeking never starts an audible source', () => {
+  const { context, transport } = setup();
+  transport.seek(600);
+  expect(context.sources).toHaveLength(0);
+  transport.dispose();
+});
+
+test('audio drift at double speed uses the inverse playback rate', () => {
+  const { driver, context, transport } = setup();
+  transport.setRate(2).play();
+  context.currentTime = .1;
+  driver.step(100);
+  context.currentTime = .2;
+  driver.step(200);
+  expect(context.sources).toHaveLength(1);
+  transport.setRate(1);
+  expect(context.sources[0].stopped).toBe(true);
+  transport.dispose();
+});
+
 test('drift beyond the threshold restarts the source', () => {
   const { driver, context, transport } = setup();
   transport.play();

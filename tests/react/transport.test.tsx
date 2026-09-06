@@ -31,6 +31,27 @@ test('<Transport> provides a transport instance, idle until autoplay/paused cont
   expect(seen!.state).toBe('idle');
 });
 
+test('an owned boolean loop uses the duration registered by declarative children', async () => {
+  const { driver, scheduler } = createTestScheduler();
+  const value = new MotionValue<number>(0);
+  let seen: CoreTransport | null = null;
+  render(
+    <Transport scheduler={scheduler} loop autoplay respectReducedMotion={false}>
+      <Tween target={value} from={0} to={1} duration={100} easing="linear" />
+      <Probe onTransport={(transport) => { seen = transport; }} />
+    </Transport>,
+  );
+  await flush();
+
+  expect(seen!.duration).toBe(100);
+  act(() => { driver.advance(50); });
+  expect(seen!.time).toBe(50);
+  expect(value.get()).toBeCloseTo(.5, 6);
+  act(() => { driver.advance(75); });
+  expect(seen!.time).toBe(25);
+  expect(value.get()).toBeCloseTo(.25, 6);
+});
+
 test('<Sequence> registers its children in declaration order, matching an imperative build', async () => {
   const { scheduler } = createTestScheduler();
   const transport = new CoreTransport({ scheduler });

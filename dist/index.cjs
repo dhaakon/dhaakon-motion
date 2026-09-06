@@ -236,7 +236,6 @@ var FrameScheduler = class {
   constructor(driver2 = globalThisDriver) {
     this.driver = driver2;
   }
-  driver;
   tasks = /* @__PURE__ */ new Set();
   frame = null;
   get size() {
@@ -258,7 +257,10 @@ var FrameScheduler = class {
     }
   }
   flush(time = this.now()) {
-    for (const task of [...this.tasks]) if (task(time) === false) this.tasks.delete(task);
+    for (const task of [...this.tasks]) {
+      if (!this.tasks.has(task)) continue;
+      if (task(time) === false) this.tasks.delete(task);
+    }
   }
   clear() {
     this.tasks.clear();
@@ -294,6 +296,7 @@ function totalDuration(spec) {
 }
 function sampleCycle(spec, milliseconds) {
   const active = Math.max(0, milliseconds - spec.delay);
+  if (spec.duration === Infinity) return { iteration: 0, cycleTime: active, progress: 0, active };
   const cycleDuration = spec.duration + spec.repeatDelay;
   const iteration = spec.duration === 0 ? spec.repeat : Math.min(spec.repeat, Math.floor(active / Math.max(1, cycleDuration)));
   const cycleTime = Math.min(spec.duration, Math.max(0, active - iteration * cycleDuration));
@@ -560,8 +563,8 @@ var Track = class {
   }
   sampleAt(localMs, ctx) {
     const spec = { duration: this.duration, delay: 0, repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction, reversed: false };
-    const { cycleTime } = sampleCycle(spec, localMs);
-    this.apply(this.valueAt(cycleTime), ctx);
+    const { progress, cycleTime } = sampleCycle(spec, localMs);
+    this.apply(this.valueAt(Number.isFinite(this.duration) ? progress * this.duration : cycleTime), ctx);
   }
 };
 function track(target, keyframes, options = {}) {
@@ -659,7 +662,6 @@ var PhysicsItem = class {
       this.resolveFinished = resolve;
     });
   }
-  apply;
   name;
   frameLoop;
   startedAt = 0;
@@ -1107,7 +1109,6 @@ var MotionValue = class {
     this.updatedAtValue = scheduler.now();
     this.previousAt = this.updatedAtValue;
   }
-  current;
   listeners = /* @__PURE__ */ new Set();
   animation;
   previous;
@@ -1364,7 +1365,8 @@ var Transport = class {
     return this._state === "playing" ? this.pause() : this.play();
   }
   seek(to, options = {}) {
-    let target = Math.max(0, Math.min(this.boundedDuration(), parseTime(to, this.frameRate)));
+    let target = Math.max(0, Math.min(this.duration, parseTime(to, this.frameRate)));
+    if (!Number.isFinite(target)) return this;
     if (this.loopRegion && target === this.loopRegion[1]) {
       const [a, b] = this.loopRegion;
       const carriedCues = this.renderAt(b, options.cues !== "skip", { emit: false, direction: 1 });
@@ -1447,6 +1449,8 @@ var Transport = class {
   }
   dispose() {
     this.removeFrame?.();
+    this.removeFrame = void 0;
+    if (this._state === "playing") this._state = "paused";
     for (const output of this.outputs) output.onDetach?.();
     this.outputs.clear();
     this.listeners.clear();
@@ -1484,6 +1488,7 @@ var Transport = class {
           this.renderAt(b, false, { emit: false, direction: -1 });
         }
       }
+      this.anchorTime += remaining - rawTime;
       this._time = Math.max(a, Math.min(b, remaining));
       this.renderAt(this._time, true, { direction: this._rate >= 0 ? 1 : -1, carriedCues });
       return;
@@ -1653,6 +1658,9 @@ var Timeline = class _Timeline {
   }
   add(item, at) {
     if (item instanceof _Timeline) {
+      for (let ancestor = this; ancestor; ancestor = ancestor.parentTimeline) {
+        if (ancestor === item) throw new Error("A timeline cannot contain itself or an ancestor.");
+      }
       if (item.parentTimeline) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ""} is already attached to another timeline.`);
       if (item.ownTransport) throw new Error(`Timeline${item.name ? ` "${item.name}"` : ""} already has its own transport (it was played directly); nest it before playing it.`);
       item.parentTimeline = this;
@@ -1731,7 +1739,8 @@ var Timeline = class _Timeline {
   seekToMarker(name) {
     const time = this.labels.get(name);
     if (time == null) throw new Error(`Unknown timeline label: ${name}`);
-    this.seek(this.totalDuration ? time / this.totalDuration : 0);
+    const duration = this.seekDuration;
+    this.seek(duration ? time / duration : 0);
     return this;
   }
   nextMarker(fromMs = this.lastCycleTime ?? 0) {
@@ -1859,11 +1868,15 @@ var Timeline = class _Timeline {
     this.transport.reverse();
     return this;
   }
-  /** `progress` is a 0..1 fraction of `totalDuration`, matching the pre-0.4 API. */
+  /** `progress` is a 0..1 fraction of finite total duration; an infinite repeat addresses one authored content cycle. */
   seek(progress) {
-    const duration = this.totalDuration;
-    this.transport.seek(Number.isFinite(duration) ? Math.max(0, Math.min(1, progress)) * duration : 0);
+    this.transport.seek(Math.max(0, Math.min(1, progress)) * this.seekDuration);
     return this;
+  }
+  /** Infinite repeats seek within one authored content cycle, like `Tween.seek()`. */
+  get seekDuration() {
+    const total = this.totalDuration;
+    return Number.isFinite(total) ? total : Number.isFinite(this.duration) ? this.duration : 0;
   }
   loop(value = true) {
     this.options.repeat = value ? Infinity : 0;
@@ -1880,13 +1893,14 @@ var Timeline = class _Timeline {
       reversed: false
     };
     const { cycleTime, iteration, progress } = sampleCycle(spec, localMs);
-    if (ctx.fireCues && this.points.length) this.fireCrossings(cycleTime, iteration, ctx);
-    this.lastCycleTime = cycleTime;
+    const contentTime = this.iterationReversed(iteration) && Number.isFinite(this.duration) ? this.duration - cycleTime : cycleTime;
+    if (ctx.fireCues && this.points.length) this.fireCrossings(contentTime, iteration, ctx);
+    this.lastCycleTime = contentTime;
     this.lastIteration = iteration;
-    for (const entry of this.entries) entry.item.sampleAt(cycleTime - entry.start, ctx);
-    this.options.onUpdate?.(cycleTime, progress);
-    if (progress >= 1 && iteration >= (this.options.repeat ?? 0)) this.options.onComplete?.();
-    return cycleTime;
+    for (const entry of this.entries) entry.item.sampleAt(contentTime - entry.start, ctx);
+    this.options.onUpdate?.(contentTime, progress);
+    if (Number.isFinite(this.totalDuration) && localMs >= this.totalDuration) this.options.onComplete?.();
+    return contentTime;
   }
   /** Alias of `sampleAt` for absolute (not delay-relative) callers, matching the pre-0.4 API. */
   render(time) {
@@ -1901,13 +1915,14 @@ var Timeline = class _Timeline {
   iterationReversed(iteration) {
     return this.options.yoyo === true && iteration % 2 === 1;
   }
-  fireCrossings(cycleTime, iteration, ctx) {
+  fireCrossings(contentTime, iteration, ctx) {
     if (this.lastCycleTime == null) {
-      this.fireSegment(ctx.direction >= 0 ? -Infinity : Infinity, cycleTime, ctx);
+      const contentMovesForward = ctx.direction >= 0 !== this.iterationReversed(iteration);
+      this.fireSegment(contentMovesForward ? -Infinity : Infinity, contentTime, ctx);
       return;
     }
     if (iteration === this.lastIteration) {
-      this.fireSegment(this.lastCycleTime, cycleTime, ctx);
+      this.fireSegment(this.lastCycleTime, contentTime, ctx);
       return;
     }
     const stepDir = iteration > this.lastIteration ? 1 : -1;
@@ -1915,12 +1930,14 @@ var Timeline = class _Timeline {
     let from = this.lastCycleTime;
     let guard = 0;
     while (iter !== iteration && guard++ < 2e3) {
-      const tail = this.iterationReversed(iter) ? 0 : this.duration;
-      this.fireSegment(from, tail, ctx);
+      const reversed = this.iterationReversed(iter);
+      const boundary = stepDir > 0 ? reversed ? 0 : this.duration : reversed ? this.duration : 0;
+      this.fireSegment(from, boundary, ctx);
       iter += stepDir;
-      from = this.iterationReversed(iter) ? this.duration : 0;
+      const nextReversed = this.iterationReversed(iter);
+      from = stepDir > 0 ? nextReversed ? this.duration : 0 : nextReversed ? 0 : this.duration;
     }
-    this.fireSegment(from, cycleTime, ctx);
+    this.fireSegment(from, contentTime, ctx);
   }
   fireSegment(fromT, toT, ctx) {
     if (toT === fromT || !this.points.length) return;

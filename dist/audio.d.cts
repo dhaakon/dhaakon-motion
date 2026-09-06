@@ -1,4 +1,4 @@
-import { T as TimelineItem, C as Clock, a as TransportOutput, K as Keyframe, b as TrackOptions, c as Track, d as Transport, e as Timeline } from './track-D8CkFR8E.cjs';
+import { TimelineItem, Clock, TransportOutput, Keyframe, TrackOptions, Track, Transport, Timeline } from '@dhaakon/motion';
 
 /** `now()` reads an `AudioContext`'s own clock, in milliseconds — pass as a `Transport`'s `clock` to make audio the master. */
 declare function audioClock(context: Pick<AudioContext, 'currentTime'>): Clock;

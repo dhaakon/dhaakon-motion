@@ -3,3 +3,5 @@ docs/dist/
 *.tgz
 *.log
 .DS_Store
+exports/
+test-results/

@@ -21,7 +21,10 @@ export class FrameScheduler {
   add(task: FrameTask) { this.tasks.add(task); this.wake(); return () => this.delete(task); }
   delete(task: FrameTask) { this.tasks.delete(task); if (!this.tasks.size && this.frame != null) { this.driver.cancel(this.frame); this.frame = null; } }
   flush(time = this.now()) {
-    for (const task of [...this.tasks]) if (task(time) === false) this.tasks.delete(task);
+    for (const task of [...this.tasks]) {
+      if (!this.tasks.has(task)) continue;
+      if (task(time) === false) this.tasks.delete(task);
+    }
   }
   clear() { this.tasks.clear(); if (this.frame != null) this.driver.cancel(this.frame); this.frame = null; }
   /** Swap the underlying time/frame source (used by tests). Cancels any pending frame and re-wakes on the new driver if tasks are active. */

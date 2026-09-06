@@ -1,0 +1,7 @@
+node_modules/
+dist/
+docs/dist/
+docs/public/
+exports/
+test-results/
+package-lock.json

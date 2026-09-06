@@ -1,7 +1,4 @@
-import { Track, type Keyframe, type TrackOptions } from './track';
-import { Timeline } from './timeline';
-import { Transport, type Clock, type TransportOutput } from './transport';
-import type { TimelineItem } from './items';
+import { Track, Timeline, Transport, type Keyframe, type TrackOptions, type Clock, type TransportOutput, type TimelineItem } from '@dhaakon/motion';
 
 /** `now()` reads an `AudioContext`'s own clock, in milliseconds — pass as a `Transport`'s `clock` to make audio the master. */
 export function audioClock(context: Pick<AudioContext, 'currentTime'>): Clock {
@@ -71,7 +68,7 @@ function collectAudioClips(timeline: Timeline, offset: number, out: PlacedClip[]
   return out;
 }
 
-interface ActiveVoice { source: AudioBufferSourceNode; startedAtContextTime: number; startedAtTransportTime: number; }
+interface ActiveVoice { source: AudioBufferSourceNode; gain: GainNode; startedAtContextTime: number; startedAtTransportTime: number; }
 
 export interface AudioOutputOptions {
   /** How far (ms) a playing source may drift from where it should be before it is stopped and restarted. Default 25. */
@@ -92,11 +89,14 @@ export function audioOutput(context: AudioContext, options: AudioOutputOptions =
   const driftThreshold = options.driftThreshold ?? 25;
   const active = new Map<AudioClip, ActiveVoice>();
   let clips: PlacedClip[] = [];
+  let owner: Transport | undefined;
 
   const stopVoice = (clip: AudioClip) => {
     const voice = active.get(clip);
     if (!voice) return;
     try { voice.source.stop(); } catch { /* already stopped */ }
+    voice.source.disconnect();
+    voice.gain.disconnect();
     active.delete(clip);
   };
   const stopAll = () => { for (const clip of [...active.keys()]) stopVoice(clip); };
@@ -112,34 +112,31 @@ export function audioOutput(context: AudioContext, options: AudioOutputOptions =
     gainNode.connect(placed.clip.destination ?? context.destination);
     const offsetIntoClip = Math.max(0, (info.time - placed.start) / 1000 + placed.clip.offset / 1000);
     source.start(context.currentTime, offsetIntoClip);
-    active.set(placed.clip, { source, startedAtContextTime: context.currentTime, startedAtTransportTime: info.time });
+    active.set(placed.clip, { source, gain: gainNode, startedAtContextTime: context.currentTime, startedAtTransportTime: info.time });
   };
 
   return {
     name: options.name ?? 'audio',
     supportsOffline: false,
-    onAttach(transport) { clips = collectAudioClips(transport.root, 0, []); },
+    onAttach(transport) { owner = transport; clips = collectAudioClips(transport.root, 0, []); },
     onStateChange(state) { if (state !== 'playing') stopAll(); },
     // No onSeek handler: Transport fires onTick (with the new time) before onSeek, so
     // stopping here would undo whatever the tick's drift check just correctly started.
     // A seek already reads as a large drift on the next tick and restarts naturally.
-    onRateChange(rate) {
-      if (rate <= 0) { stopAll(); return; }
-      for (const voice of active.values()) voice.source.playbackRate.value = Math.abs(rate);
-    },
+    onRateChange() { stopAll(); },
     onTick(info) {
-      if (info.rate <= 0) { stopAll(); return; }
+      if (owner?.state !== 'playing' || info.rate <= 0) { stopAll(); return; }
       for (const placed of clips) {
         const shouldPlay = info.time >= placed.start && info.time < placed.end;
         if (!shouldPlay) { stopVoice(placed.clip); continue; }
         const voice = active.get(placed.clip);
         if (!voice) { startVoice(placed, info); continue; }
-        const expectedContextTime = voice.startedAtContextTime + ((info.time - voice.startedAtTransportTime) / 1000) * info.rate;
+        const expectedContextTime = voice.startedAtContextTime + ((info.time - voice.startedAtTransportTime) / 1000) / info.rate;
         const driftMs = Math.abs(context.currentTime - expectedContextTime) * 1000;
         if (driftMs > driftThreshold) { stopVoice(placed.clip); startVoice(placed, info); }
       }
     },
-    onDetach() { stopAll(); },
+    onDetach() { stopAll(); owner = undefined; },
     async unlock() { if (context.state === 'suspended') await context.resume(); },
   };
 }

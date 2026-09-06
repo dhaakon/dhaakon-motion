@@ -4,6 +4,7 @@ import { DhaakonProvider } from '@dhaakon/ui';
 import '@dhaakon/ui/styles.css';
 import './docs.css';
 import { App } from './App';
+import './routes.css';
 
 declare const __MOTION_VERSION__: string;
 

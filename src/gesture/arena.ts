@@ -8,7 +8,12 @@ export class GestureArena {
   private winner?: Recognizer; private disposed = false; private extras: Array<() => void> = [];
   constructor(readonly element: Element, readonly recognizers: Recognizer[], options: Omit<Partial<SessionOptions>, 'element' | 'onSample' | 'onEnd'> = {}) {
     arenas.set(element, this);
-    for (const recognizer of recognizers) if (recognizer.attach) this.extras.push(recognizer.attach(element));
+    for (const recognizer of recognizers) {
+      if (recognizer.attach) this.extras.push(recognizer.attach(element));
+      // Long press is the one built-in whose claim happens asynchronously,
+      // without an onMove verdict for the arena to observe.
+      if (recognizer.kind === 'longPress') this.extras.push(recognizer.subscribe((event) => { if (event.phase === 'began' && !this.disposed && !this.winner) this.claim(recognizer); }));
+    }
     this.session = createPointerSession({ element, ...options, onSample: (sample, pointers) => this.handleSample(sample, { pointers }), onEnd: (sample, cancelled) => this.handleEnd(sample, cancelled) });
   }
   settle(recognizer: Recognizer) { if (!this.recognizers.includes(recognizer)) throw new Error('GestureArena.settle: recognizer is not in this arena'); this.claim(recognizer); }

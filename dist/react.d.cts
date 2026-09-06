@@ -61,6 +61,8 @@ type MotionElementProps<T extends React.ElementType> = NativeProps<T> & {
     dragMomentum?: DragOptions['momentum'];
     dragSnap?: DragOptions['snap'];
     dragPropagation?: boolean;
+    dragListener?: boolean;
+    dragKeyboard?: boolean;
     dragControls?: ReturnType<typeof useDragControls>;
     onTap?: (event: GestureEvent<'tap'>) => void;
     onLongPress?: (event: GestureEvent<'longPress'>) => void;

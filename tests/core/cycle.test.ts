@@ -14,6 +14,11 @@ test('sampleCycle honors delay before starting', () => {
   expect(sampleCycle(spec, 70).progress).toBe(0.5);
 });
 
+test('sampleCycle treats an infinite content duration as one unbounded iteration', () => {
+  const spec = { duration: Infinity, delay: 0, repeat: 0, repeatDelay: 0, direction: 'normal' as const, reversed: false };
+  expect(sampleCycle(spec, 75)).toEqual({ iteration: 0, cycleTime: 75, progress: 0, active: 75 });
+});
+
 test('activeDuration and totalDuration account for repeats and delay', () => {
   const cycle = { duration: 100, repeat: 2, repeatDelay: 10 };
   expect(activeDuration(cycle)).toBe(100 * 3 + 10 * 2);

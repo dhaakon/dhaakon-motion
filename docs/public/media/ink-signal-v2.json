@@ -1,0 +1,16 @@
+{
+  "filename": "dhaakon-ink-signal-v2-1920x1080-24fps.mp4",
+  "width": 1920,
+  "height": 1080,
+  "frames": 576,
+  "fps": 24,
+  "duration": 24,
+  "bytes": 5807732,
+  "sha256": "6d9502bdfb5f00322b3bcbf8a028bad63ba4e9f479c4aa230c9ac0deb1874852",
+  "sourceSha256": "8bc559bed37a3b4fedaf2f57fd4b24ae9331b68eeacd1e86e1738642332637d3",
+  "encoder": "GStreamer x264enc / quality 18 / high / I420 / BT.709",
+  "frameRange": [
+    0,
+    575
+  ]
+}

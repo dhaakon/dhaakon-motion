@@ -2,6 +2,8 @@ export type PointerType = 'mouse' | 'touch' | 'pen';
 export interface PointerSample { id: number; type: PointerType; x: number; y: number; t: number; pressure: number; buttons: number; isPrimary: boolean; predicted?: boolean; native?: PointerEvent }
 export interface SessionOptions {
   element: Element;
+  /** Attach the element's own pointerdown listener. Disable for handle-only controls. */
+  listen?: boolean;
   capture?: boolean;
   touchAction?: 'auto' | 'none' | 'pan-x' | 'pan-y' | 'manipulation' | 'inherit';
   passive?: boolean;
@@ -12,7 +14,13 @@ export interface SessionOptions {
   onEnd(sample: PointerSample, cancelled: boolean): void;
 }
 
-export interface PointerSession { dispose(): void; pointers: ReadonlyMap<number, PointerSample[]>; preventScroll(active: boolean): void }
+export interface PointerSession {
+  dispose(): void;
+  pointers: ReadonlyMap<number, PointerSample[]>;
+  preventScroll(active: boolean): void;
+  /** Adopt a pointer that began on another element, such as a drag handle. */
+  start(event: PointerEvent): void;
+}
 
 function normalize(event: PointerEvent, predicted = false): PointerSample {
   const type = event.pointerType === 'touch' || event.pointerType === 'pen' ? event.pointerType : 'mouse';
@@ -41,8 +49,11 @@ export function createPointerSession(options: SessionOptions): PointerSession {
     }
     options.onSample(sample, pointers); return sample;
   };
-  const attach = () => {
-    if (listenerTarget) return; listenerTarget = capture ? element : document;
+  const attach = (external = false) => {
+    // An externally-started pointer continues to dispatch through its original
+    // target when pointer capture isn't available (or is emulated in tests).
+    // Listen at the document in that case so a separate handle remains usable.
+    if (listenerTarget) return; listenerTarget = external || !capture ? document : element;
     listenerTarget.addEventListener('pointermove', onMove as EventListener, listenerOptions);
     listenerTarget.addEventListener('pointerup', onUp as EventListener, listenerOptions);
     listenerTarget.addEventListener('pointercancel', onCancel as EventListener, listenerOptions);
@@ -66,11 +77,12 @@ export function createPointerSession(options: SessionOptions): PointerSession {
     if (capture && element.hasPointerCapture?.(event.pointerId)) { try { element.releasePointerCapture(event.pointerId); } catch {} }
     if (!pointers.size) { detach(); preventScroll(false); }
   };
-  function onDown(event: PointerEvent) {
-    if (disposed || (!options.secondaryButtons && event.pointerType === 'mouse' && event.button !== 0)) return;
-    attach(); push(event);
+  function begin(event: PointerEvent, external = false) {
+    if (disposed || pointers.has(event.pointerId) || (!options.secondaryButtons && event.pointerType === 'mouse' && event.button !== 0)) return;
+    attach(external); push(event);
     if (capture) { try { element.setPointerCapture?.(event.pointerId); } catch {} }
   }
+  function onDown(event: PointerEvent) { begin(event); }
   function onMove(event: PointerEvent) {
     if (!pointers.has(event.pointerId)) return;
     const actual = coalesce && event.getCoalescedEvents ? event.getCoalescedEvents() : [];
@@ -88,12 +100,14 @@ export function createPointerSession(options: SessionOptions): PointerSession {
   }
   function onBlur() { cancelAll(); }
   function onVisibility() { if (document.visibilityState === 'hidden') cancelAll(); }
-  element.addEventListener('pointerdown', onDown as EventListener, listenerOptions);
+  if (options.listen !== false) element.addEventListener('pointerdown', onDown as EventListener, listenerOptions);
   return {
     pointers,
     preventScroll,
+    start(event) { begin(event, true); },
     dispose() {
-      if (disposed) return; disposed = true; cancelAll(); element.removeEventListener('pointerdown', onDown as EventListener, listenerOptions);
+      if (disposed) return; disposed = true; cancelAll();
+      if (options.listen !== false) element.removeEventListener('pointerdown', onDown as EventListener, listenerOptions);
       if (styled.style && options.touchAction !== 'inherit') styled.style.touchAction = previousTouchAction ?? '';
       if (styled.style) styled.style.webkitUserSelect = previousSelect ?? '';
     },

@@ -1,5 +1,4 @@
-import { Track } from '../track';
-import { frameRate, frameToMs, msToFrame, type FrameRateInput } from '../time';
+import { Track, frameRate, frameToMs, msToFrame, type FrameRateInput } from '@dhaakon/motion';
 import type { ManualDriver } from '../testing';
 
 export interface GestureSample { id: number; type: string; kind: 'down' | 'move' | 'up' | 'cancel'; x: number; y: number; t: number; pressure?: number }
@@ -53,4 +52,3 @@ export function gestureToTrack(recording: GestureRecording, options: { pointerId
   if (!keyframes.length) keyframes.push({ at: 0, value: axis === 'both' ? { x: 0, y: 0 } : 0 });
   return new Track<any>({ frameRate: rate, keyframes, apply: () => {} });
 }
-

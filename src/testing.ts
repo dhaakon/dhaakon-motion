@@ -1,10 +1,7 @@
-import { FrameScheduler, scheduler, type FrameDriver } from './scheduler';
-import { Tween } from './core';
-import type { MotionValueShape } from './interpolate';
-import { Timeline } from './timeline';
-import { frameRate, parseTime, type FrameRateInput, type TimeInput } from './time';
-import { replay, type GestureRecording } from './gesture/record';
-import { MotionValue } from './core';
+import { FrameScheduler, scheduler, Tween, Timeline, MotionValue, frameRate, parseTime,
+  type FrameDriver, type MotionValueShape, type FrameRateInput, type TimeInput,
+} from '@dhaakon/motion';
+import { replay, type GestureRecording } from '@dhaakon/motion/gesture';
 
 /**
  * A fully controllable `FrameDriver`: nothing runs until `step`/`advance` is

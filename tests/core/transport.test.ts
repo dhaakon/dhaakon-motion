@@ -26,6 +26,21 @@ test('rate doubles progress', () => {
   expect(transport.time).toBe(200);
 });
 
+test('seek accepts a finite time when the root duration is infinite', () => {
+  const value = new Tween({ from: 0, to: 100, duration: 100, easing: 'linear' });
+  const root = new Timeline({ repeat: Infinity }).add(value, 0);
+  const transport = new Transport({ root });
+  expect(transport.duration).toBe(Infinity);
+  transport.seek(75);
+  expect(transport.time).toBe(75); expect(value.value).toBe(75);
+});
+
+test('seek still clamps positive infinity to a finite transport end', () => {
+  const transport = new Transport({ duration: 100 });
+  transport.seek(Infinity);
+  expect(transport.time).toBe(100);
+});
+
 test('a negative rate plays backward and finishes at 0', () => {
   const { driver, scheduler: loop } = createTestScheduler();
   const transport = new Transport({ scheduler: loop, duration: 1000, rate: -1 });
@@ -49,6 +64,18 @@ test('a loop region wraps and carries the overshoot forward', () => {
   expect(transport.time).toBe(50);
   expect(laps).toBe(1);
   expect(transport.state).toBe('playing'); // a loop never finishes
+});
+
+test('a reverse loop wraps below its lower bound and carries the overshoot backward', () => {
+  const { driver, scheduler: loop } = createTestScheduler();
+  const transport = new Transport({ scheduler: loop, duration: 1000, loop: [0, 200], rate: -1 });
+  let laps = 0;
+  transport.onLoop(() => { laps += 1; });
+  transport.play();
+  driver.step(50);
+  expect(transport.time).toBe(150);
+  expect(laps).toBe(1);
+  expect(transport.state).toBe('playing');
 });
 
 test('a forward loop is half-open and never emits its upper-bound frame', () => {

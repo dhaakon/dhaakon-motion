@@ -1,4 +1,4 @@
-import { MotionValue } from '../core';
+import type { MotionValue } from '@dhaakon/motion';
 
 export interface KeyboardOptions {
   axis?: 'x' | 'y'; min?: number; max?: number; step?: number; label?: string; reducedMotion?: boolean;
@@ -34,4 +34,3 @@ export function installDragKeyboard(element: Element, value: MotionValue<number>
   element.addEventListener('keydown', onKey as EventListener);
   return () => { unsubscribe(); element.removeEventListener('keydown', onKey as EventListener); for (const [name, previous] of authored) { if (previous == null) element.removeAttribute(name); else element.setAttribute(name, previous); } };
 }
-

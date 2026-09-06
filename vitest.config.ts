@@ -1,19 +1,6 @@
-import { resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
-
-const src = resolve(__dirname, 'src');
-
-const alias = [
-  { find: /^@dhaakon\/motion\/react$/, replacement: resolve(src, 'react.tsx') },
-  { find: /^@dhaakon\/motion\/three$/, replacement: resolve(src, 'three.ts') },
-  { find: /^@dhaakon\/motion\/audio$/, replacement: resolve(src, 'audio.ts') },
-  { find: /^@dhaakon\/motion\/midi$/, replacement: resolve(src, 'midi.ts') },
-  { find: /^@dhaakon\/motion\/testing$/, replacement: resolve(src, 'testing.ts') },
-  { find: /^@dhaakon\/motion\/devtools$/, replacement: resolve(src, 'devtools.ts') },
-  { find: /^@dhaakon\/motion\/gesture$/, replacement: resolve(src, 'gesture/index.ts') },
-  { find: /^@dhaakon\/motion$/, replacement: resolve(src, 'index.ts') },
-];
+import { sourceAliases as alias } from './docs/source-aliases';
 
 export default defineConfig({
   resolve: { alias, dedupe: ['react', 'react-dom'] },

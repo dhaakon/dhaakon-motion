@@ -1,6 +1,6 @@
 import type { Transport, FrameInfo } from './transport';
 import type { InspectNode } from './timeline';
-import { saveSheet } from './sheet';
+import { saveSheet } from '@dhaakon/motion';
 
 export interface MountInspectorOptions {
   container?: HTMLElement;

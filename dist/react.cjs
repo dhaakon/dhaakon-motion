@@ -170,6 +170,8 @@ function createMotionComponent(tag) {
       dragMomentum,
       dragSnap,
       dragPropagation,
+      dragListener,
+      dragKeyboard,
       dragControls,
       onTap,
       onLongPress,
@@ -187,6 +189,10 @@ function createMotionComponent(tag) {
     const localRef = (0, import_react.useRef)(null);
     const config = (0, import_react.useContext)(MotionContext);
     const reduced = useReducedMotion();
+    const gestureHandlers = (0, import_react.useRef)({ onTap, onLongPress, onPanStart, onPan, onPanEnd, onPinch, onDragStart, onDrag, onDragEnd });
+    gestureHandlers.current = { onTap, onLongPress, onPanStart, onPan, onPanEnd, onPinch, onDragStart, onDrag, onDragEnd };
+    const dragBoundsRef = (0, import_react.useRef)(dragBounds);
+    dragBoundsRef.current = dragBounds;
     const [inViewRef, inView] = useInView({ ...viewport, disabled: !whileInView });
     const hasAnimated = (0, import_react.useRef)(false);
     const visual = (0, import_react.useRef)({});
@@ -234,37 +240,53 @@ function createMotionComponent(tag) {
     const tapKey = stableKey(whileTap);
     const dragKey = stableKey(whileDrag);
     const focusKey = stableKey(whileFocus);
-    const boundsKey = stableKey(dragBounds);
+    const boundsKey = typeof dragBounds === "function" ? "function" : stableKey(dragBounds);
     const snapKey = stableKey(dragSnap);
     (0, import_react.useEffect)(() => {
       const node = localRef.current;
       if (!node) return;
-      const base = () => whileInView && inView ? whileInView : target ?? (initial || {});
-      const animateInteraction = (state) => {
-        const next = { ...base(), ...state ?? {} };
+      let liveDragValues;
+      const preserveDragPosition = (value) => {
+        if (!liveDragValues) return value;
+        const next = { ...value };
+        if (liveDragValues.x) next.x = liveDragValues.x.get();
+        if (liveDragValues.y) next.y = liveDragValues.y.get();
+        return next;
+      };
+      const resting = (0, import_motion.readStyle)(node, { ...whileHover, ...whileFocus, ...whileTap, ...whileDrag });
+      visual.current = { ...resting, ...visual.current };
+      const active = { hover: false, focus: false, tap: false, drag: false };
+      const base = () => ({ ...resting, ...whileInView && inView ? whileInView : target ?? (initial || {}) });
+      const animateInteraction = () => {
+        const next = { ...base(), ...active.hover ? whileHover : {}, ...active.focus ? whileFocus : {}, ...active.tap ? whileTap : {}, ...active.drag ? whileDrag : {} };
         interactionTween.current?.cancel();
         if (reduced) {
-          visual.current = { ...visual.current, ...next };
+          visual.current = preserveDragPosition({ ...visual.current, ...next });
           (0, import_motion.writeStyle)(node, visual.current);
           return;
         }
         interactionTween.current = new import_motion.Tween({ ...config.transition, ...transition, from: { ...visual.current }, to: next, onUpdate: (value) => {
-          visual.current = value;
-          (0, import_motion.writeStyle)(node, value);
+          visual.current = preserveDragPosition(value);
+          (0, import_motion.writeStyle)(node, visual.current);
         } }).play();
+      };
+      const setActive = (kind, value) => {
+        if (active[kind] === value) return;
+        active[kind] = value;
+        animateInteraction();
       };
       const disposers = [];
       if (whileHover) {
-        const binding = (0, import_gesture.hover)(node, { onChange: (active) => animateInteraction(active ? whileHover : void 0) });
+        const binding = (0, import_gesture.hover)(node, { onChange: (value) => setActive("hover", value) });
         disposers.push(binding.dispose);
       }
       if (whileTap) {
-        const binding = (0, import_gesture.press)(node, { onChange: (active) => animateInteraction(active ? whileTap : void 0) });
+        const binding = (0, import_gesture.press)(node, { onChange: (value) => setActive("tap", value) });
         disposers.push(binding.dispose);
       }
       if (whileFocus) {
-        const focus = () => animateInteraction(whileFocus);
-        const blur = () => animateInteraction();
+        const focus = () => setActive("focus", true);
+        const blur = () => setActive("focus", false);
         node.addEventListener("focus", focus);
         node.addEventListener("blur", blur);
         disposers.push(() => {
@@ -276,26 +298,26 @@ function createMotionComponent(tag) {
         const recognizers = [];
         if (onTap) {
           const recognizer = (0, import_gesture.tapRecognizer)();
-          recognizer.subscribe(onTap);
+          recognizer.subscribe((event) => gestureHandlers.current.onTap?.(event));
           recognizers.push(recognizer);
         }
         if (onLongPress) {
           const recognizer = (0, import_gesture.longPressRecognizer)();
-          recognizer.subscribe(onLongPress);
+          recognizer.subscribe((event) => gestureHandlers.current.onLongPress?.(event));
           recognizers.push(recognizer);
         }
         if (onPanStart || onPan || onPanEnd) {
           const recognizer = (0, import_gesture.panRecognizer)({ axis: dragAxis });
           recognizer.subscribe((event) => {
-            if (event.phase === "began") onPanStart?.(event);
-            else if (event.phase === "changed") onPan?.(event);
-            else if (event.phase === "ended") onPanEnd?.(event);
+            if (event.phase === "began") gestureHandlers.current.onPanStart?.(event);
+            else if (event.phase === "changed") gestureHandlers.current.onPan?.(event);
+            else if (event.phase === "ended") gestureHandlers.current.onPanEnd?.(event);
           });
           recognizers.push(recognizer);
         }
         if (onPinch) {
           const recognizer = (0, import_gesture.pinchRecognizer)();
-          recognizer.subscribe(onPinch);
+          recognizer.subscribe((event) => gestureHandlers.current.onPinch?.(event));
           recognizers.push(recognizer);
         }
         const arena = new import_gesture.GestureArena(node, recognizers);
@@ -304,32 +326,37 @@ function createMotionComponent(tag) {
       if (drag) {
         const x = new import_motion.MotionValue(Number(visual.current.x ?? 0));
         const y = new import_motion.MotionValue(Number(visual.current.y ?? 0));
+        const axis = dragAxis ?? (drag === true ? "any" : drag);
+        liveDragValues = axis === "x" ? { x } : axis === "y" ? { y } : { x, y };
         const writeDrag = () => {
-          visual.current = { ...visual.current, x: x.get(), y: y.get() };
+          visual.current = preserveDragPosition(visual.current);
           (0, import_motion.writeStyle)(node, visual.current);
         };
-        const ux = x.subscribe(writeDrag);
-        const uy = y.subscribe(writeDrag);
-        const axis = dragAxis ?? (drag === true ? "any" : drag);
+        const ux = liveDragValues.x ? x.subscribe(writeDrag) : () => {
+        };
+        const uy = liveDragValues.y ? y.subscribe(writeDrag) : () => {
+        };
+        const currentBounds = () => {
+          const value = dragBoundsRef.current;
+          return typeof value === "function" ? value() : value;
+        };
         const binding = (0, import_gesture.drag)(axis === "x" ? x : axis === "y" ? y : { x, y }, node, {
           axis,
-          bounds: dragBounds,
+          bounds: currentBounds,
           elastic: dragElastic,
           momentum: dragMomentum,
           snap: dragSnap,
           propagate: dragPropagation,
-          onStart: (event) => {
-            animateInteraction(whileDrag);
-            onDragStart?.(event);
-          },
-          onMove: (event) => onDrag?.(event),
-          onEnd: (event) => {
-            animateInteraction();
-            onDragEnd?.(event);
-          }
+          dragListener,
+          keyboard: dragKeyboard,
+          onStart: (event) => gestureHandlers.current.onDragStart?.(event),
+          onMove: (event) => gestureHandlers.current.onDrag?.(event),
+          onEnd: (event) => gestureHandlers.current.onDragEnd?.(event)
         });
+        const dragging = binding.isDragging.subscribe(() => setActive("drag", binding.isDragging.get()));
         dragControls?._bind(binding);
         disposers.push(() => {
+          dragging();
           dragControls?._unbind(binding);
           ux();
           uy();
@@ -340,7 +367,7 @@ function createMotionComponent(tag) {
         interactionTween.current?.cancel();
         disposers.forEach((dispose) => dispose());
       };
-    }, [hoverKey, tapKey, dragKey, focusKey, boundsKey, snapKey, Boolean(drag), dragAxis, dragElastic, dragMomentum, dragPropagation, reduced]);
+    }, [hoverKey, tapKey, dragKey, focusKey, boundsKey, snapKey, Boolean(drag), dragAxis, dragElastic, dragMomentum, dragPropagation, dragListener, dragKeyboard, Boolean(onTap), Boolean(onLongPress), Boolean(onPanStart || onPan || onPanEnd), Boolean(onPinch), dragControls, reduced]);
     return import_react.default.createElement(as || tag, { ...props, style, ref: (node) => {
       localRef.current = node;
       inViewRef.current = node;
@@ -502,6 +529,8 @@ function Transport(props) {
   const reduced = useReducedMotion();
   const respect = props.respectReducedMotion !== false;
   const ownsInstance = (0, import_react.useRef)(false);
+  const loopRef = (0, import_react.useRef)(props.loop);
+  loopRef.current = props.loop;
   const instanceRef = (0, import_react.useRef)(null);
   if (!instanceRef.current) {
     if (props.transport) {
@@ -552,7 +581,10 @@ function Transport(props) {
     }
   }, [transport, shouldRun, respect, reduced]);
   const sequenceValue = (0, import_react.useMemo)(
-    () => createSequenceValue(transport.root, () => transport.seek(transport.time, { cues: "skip" })),
+    () => createSequenceValue(transport.root, () => {
+      if (ownsInstance.current) transport.setLoop(loopRef.current);
+      transport.seek(transport.time, { cues: "skip" });
+    }),
     [transport]
   );
   return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TransportContext.Provider, { value: transport, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SequenceContext.Provider, { value: sequenceValue, children: props.children }) });

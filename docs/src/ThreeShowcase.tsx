@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@dhaakon/ui';
-import { MotionValue, Timeline, Tween } from '@dhaakon/motion';
+import { MotionValue, Timeline, Transport, Tween } from '@dhaakon/motion';
 import { useReducedMotion } from '@dhaakon/motion/react';
 import * as THREE from 'three';
 
@@ -311,6 +311,10 @@ export function ThreeShowcase() {
         onUpdate: (value) => particleSignal.set(value),
       }), 'show');
 
+    // The timeline repeats forever, so give its transport one finite ping-pong
+    // span to loop. This lets reverse playback wrap through zero instead of
+    // remaining "playing" on a clamped first frame.
+    new Transport({ root: sequence, duration: SHOW_DURATION * 2, loop: [0, SHOW_DURATION * 2] });
     timelineRef.current = sequence;
     reversedRef.current = false;
     sequence.render(reducedMotion ? SHOW_DURATION * 0.62 : 0);
@@ -320,6 +324,7 @@ export function ThreeShowcase() {
 
     return () => {
       sequence.stop();
+      sequence.rootTransport?.dispose();
       timelineRef.current = null;
       resizeObserver.disconnect();
       unsubscriptions.forEach((unsubscribe) => unsubscribe());
@@ -330,20 +335,35 @@ export function ThreeShowcase() {
         materials.forEach((material) => material.dispose());
       });
       renderer.dispose();
+      renderer.forceContextLoss();
     };
   }, [reducedMotion]);
 
-  const play = () => { timelineRef.current?.play(); setStatus('playing'); };
-  const pause = () => { timelineRef.current?.pause(); setStatus('paused'); };
+  const play = () => {
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+    timeline.play();
+    setStatus('playing');
+  };
+  const pause = () => {
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+    timeline.pause();
+    setStatus('paused');
+  };
   const restart = () => {
-    if (reversedRef.current) timelineRef.current?.reverse();
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+    if (reversedRef.current) timeline.reverse();
     reversedRef.current = false;
-    timelineRef.current?.stop().play();
+    timeline.stop().play();
     setStatus('playing');
   };
   const reverse = () => {
+    const timeline = timelineRef.current;
+    if (!timeline) return;
     reversedRef.current = !reversedRef.current;
-    timelineRef.current?.reverse().play();
+    timeline.reverse().play();
     setStatus('playing');
   };
 
@@ -361,7 +381,7 @@ export function ThreeShowcase() {
     </div>
     <div className="three-controls">
       <div className="three-buttons"><Button variant="accent" size="sm" onClick={play}>Play</Button><Button variant="outline" size="sm" onClick={pause}>Pause</Button><Button variant="outline" size="sm" onClick={reverse}>Reverse</Button><Button variant="outline" size="sm" onClick={restart}>Restart ↻</Button></div>
-      <label><span>SCRUB SHARED CLOCK</span><input ref={rangeRef} type="range" min="0" max="1000" defaultValue="0" aria-label="Scrub Three.js sequence" onInput={(event) => { const progress = Number(event.currentTarget.value) / 1000; timelineRef.current?.pause().seek(progress); setStatus('paused'); }} /></label>
+      <label><span>SCRUB SHARED CLOCK</span><input ref={rangeRef} type="range" min="0" max="1000" defaultValue="0" aria-label="Scrub Three.js sequence" onInput={(event) => { const progress = Number(event.currentTarget.value) / 1000; const timeline = timelineRef.current; if (!timeline) return; timeline.pause().seek(progress); setStatus('paused'); }} /></label>
     </div>
   </div>;
 }

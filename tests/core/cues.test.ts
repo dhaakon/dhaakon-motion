@@ -43,6 +43,18 @@ test('a cue at the end of a repeating timeline fires exactly once per lap', () =
   expect(fires).toEqual([100, 100, 100]);
 });
 
+test('a yoyo timeline reports content direction on alternate laps and reverse scrubs', () => {
+  const timeline = new Timeline({ repeat: 1, yoyo: true })
+    .add(new Tween({ from: 0, to: 1, duration: 100 }), 0);
+  const directions: number[] = [];
+  timeline.cue('mid', 50, (event) => directions.push(event.direction));
+
+  for (const time of [0, 60, 100, 140, 160, 200]) timeline.sampleAt(time);
+  for (const time of [140, 100, 60, 40, 0]) timeline.sampleAt(time);
+
+  expect(directions).toEqual([1, -1, 1, -1]);
+});
+
 test('a once cue fires at most once, even across repeated scrubs', () => {
   const timeline = new Timeline();
   let count = 0;

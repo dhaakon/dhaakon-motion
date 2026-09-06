@@ -65,7 +65,15 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run test && npm run test:dist",
     "docs:dev": "vite --config docs/vite.config.ts --host 0.0.0.0",
-    "docs:build": "vite build --config docs/vite.config.ts"
+    "docs:build": "vite build --config docs/vite.config.ts",
+    "docs:check": "npm run format:check && npm run docs:build && node docs/scripts/check-build.mjs",
+    "docs:smoke": "node docs/scripts/smoke.mjs",
+    "docs:render-cue": "npm run docs:build && node docs/scripts/render-cue.mjs",
+    "docs:verify-cue": "npm run docs:build && node docs/scripts/verify-cue.mjs",
+    "check:all": "npm run check && npm run docs:check && npm run docs:smoke && node docs/scripts/verify-cue.mjs",
+    "bench:gestures": "npm run build && node docs/scripts/gesture-bench.mjs",
+    "format:docs": "prettier --write docs/src/App.tsx docs/src/routes.ts docs/src/router.ts docs/src/routes.css docs/src/pages docs/src/labs docs/src/examples docs/src/components docs/src/AdvancedCueSheetLab.tsx docs/src/advancedCueSheet.ts docs/src/cue-sheet docs/scripts docs/source-aliases.ts",
+    "format:check": "prettier --check docs/src/App.tsx docs/src/routes.ts docs/src/router.ts docs/src/routes.css docs/src/pages docs/src/labs docs/src/examples docs/src/components docs/src/AdvancedCueSheetLab.tsx docs/src/advancedCueSheet.ts docs/src/cue-sheet docs/scripts docs/source-aliases.ts"
   },
   "peerDependencies": {
     "react": ">=18",
@@ -93,6 +101,7 @@
     "@types/three": "^0.185.0",
     "@vitejs/plugin-react": "^5.2.0",
     "jsdom": "^25.0.1",
+    "prettier": "3.9.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "three": "^0.185.1",

@@ -183,14 +183,15 @@ Three.js and Web Audio/MIDI types are peer/ambient dependencies only — the cor
 
 ## Cue sheets and scene states
 
-A composition can round-trip through plain JSON:
+A composition can be loaded from and serialized to plain JSON. Serialization
+currently preserves structure and named targets but is not lossless for all metadata:
 
 ```ts
 import { loadSheet, saveSheet, validateSheet } from '@dhaakon/motion';
 
 const { ok, sheet, errors } = validateSheet(json);
 const timeline = loadSheet(sheet, { targets: { camera: cameraSignal }, cues: { blackout: (e) => dmx.send(e.payload) } });
-const backToJson = saveSheet(timeline);   // target bindings and easing round-trip
+const backToJson = saveSheet(timeline);   // structure and named target bindings
 ```
 
 ```ts
@@ -391,14 +392,34 @@ The live documentation contains the complete Three.js example, including procedu
 
 ## Development
 
+Start with [AGENTS.md](AGENTS.md), the [architecture map](docs/ARCHITECTURE.md),
+and the [audit / known limitations](docs/AUDIT.md). `saveSheet` currently loses
+some cue/region and track metadata; preserve authored JSON when fidelity matters.
+
 ```sh
 npm run check           # typecheck + vitest + the packaged-output compatibility test
 npm test                # vitest only
 npm run docs:dev        # http://localhost:5175
 npm run docs:build
+npm run docs:check      # build + lazy-route and JS budget validation
+npm run docs:smoke      # real Chrome deep-link, navigation, media, cleanup checks
+npm run docs:render-cue # 576 exact SVG frames → 1080p H.264 (Chrome + GStreamer)
+npm run docs:verify-cue # decoded-frame image comparisons + live controls
+npm run check:all       # complete local verification (Chrome required)
 ```
 
 The documentation site imports the package source directly and uses `@dhaakon/ui`. Its network container is `dhaakon-motion-docs` in the `dhaakon-network` Compose stack.
+
+The [docs overview](http://dhaakon-ubuntu:21764/) runs no demos. Features have
+independent lazy-loaded routes, including [gestures](http://dhaakon-ubuntu:21764/gestures),
+[transport](http://dhaakon-ubuntu:21764/transport), [Three.js](http://dhaakon-ubuntu:21764/three),
+and the [24fps SVG / offline MP4 comparison](http://dhaakon-ubuntu:21764/svg-cue-sheet).
+The complete registry is `docs/src/routes.ts`; legacy section bookmarks redirect.
+
+The SVG director’s cut is a 24-second, five-act composition with 23 inspectable
+targets, solo/mute controls, and a side-by-side 1080p offline master. The
+[render guide](docs/CUE-SHEET.md) documents its shared SVG adapter, deterministic
+geometry, reproducible export, and decoded-frame verification limits.
 
 ## Entry points
 

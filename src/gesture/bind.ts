@@ -1,8 +1,6 @@
-import { MotionValue } from '../core';
-import { InertiaItem, clampWithRubberband, snapTo, type InertiaOptions, type PhysicsSpringOptions } from '../physics';
-import { scheduler } from '../scheduler';
-import { frameToMs, parseTime, type TimeInput } from '../time';
-import type { Transport } from '../transport';
+import { MotionValue, InertiaItem, clampWithRubberband, snapTo, scheduler, frameToMs, parseTime,
+  type InertiaOptions, type PhysicsSpringOptions, type TimeInput, type Transport,
+} from '@dhaakon/motion';
 import { GestureArena } from './arena';
 import { installDragKeyboard } from './keyboard';
 import { createPointerSession, type SessionOptions } from './pointer';
@@ -14,6 +12,8 @@ export interface DragOptions {
   axis?: Axis; bounds?: Bounds | Element | (() => Bounds); elastic?: number | false;
   momentum?: boolean | InertiaOptions<number>; snap?: number[] | { step: number; offset?: number } | ((projected: number) => number);
   snapTransition?: PhysicsSpringOptions<number>; threshold?: number; propagate?: boolean; capture?: boolean; touchAction?: SessionOptions['touchAction']; immediate?: boolean; predict?: boolean; cursor?: boolean; keyboard?: boolean; step?: number; ariaLabel?: string;
+  /** Start when the draggable itself receives pointerdown. Set false for a separate handle. */
+  dragListener?: boolean;
   cues?: { at: number | number[]; name: string }[];
   onStart?(event: GestureEvent<'pan'>): void; onMove?(event: GestureEvent<'pan'>): void;
   onEnd?(event: GestureEvent<'pan'>, outcome: { settled: Promise<unknown>; target: number }): void;
@@ -21,6 +21,12 @@ export interface DragOptions {
 export interface DragControls { dispose(): void; start(nativeEvent: PointerEvent): void; cancel(): void; isDragging: MotionValue<boolean> }
 
 function reduced() { return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches; }
+function isMotionValue(value: unknown): value is MotionValue<number> {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<MotionValue<number>>;
+  return typeof candidate.get === 'function' && typeof candidate.set === 'function' && typeof candidate.subscribe === 'function'
+    && typeof candidate.stop === 'function' && typeof candidate.spring === 'function' && typeof candidate.decay === 'function';
+}
 function numericBounds(bounds: DragOptions['bounds'], element: Element, axis: 'x' | 'y'): [number, number] {
   const resolved = typeof bounds === 'function' ? bounds() : bounds;
   if (!resolved) return [-Infinity, Infinity];
@@ -34,9 +40,11 @@ function numericBounds(bounds: DragOptions['bounds'], element: Element, axis: 'x
 function cueThresholds(options: DragOptions) { return (options.cues ?? []).flatMap((cue) => (Array.isArray(cue.at) ? cue.at : [cue.at]).map((at) => ({ at, name: cue.name }))); }
 
 export function drag(target: MotionValue<number> | { x: MotionValue<number>; y: MotionValue<number> }, element: Element, options: DragOptions = {}): DragControls {
-  const axis = options.axis ?? (target instanceof MotionValue ? 'x' : 'any'); const pan = panRecognizer({ axis, threshold: options.threshold, propagate: options.propagate });
-  const arena = new GestureArena(element, [pan], { capture: options.capture, touchAction: options.touchAction ?? (axis === 'x' ? 'pan-y' : axis === 'y' ? 'pan-x' : 'none'), predict: options.predict });
-  const isDragging = new MotionValue<boolean>(false); const values = target instanceof MotionValue ? { [axis === 'y' ? 'y' : 'x']: target } as Partial<Record<'x' | 'y', MotionValue<number>>> : target;
+  const scalarTarget = isMotionValue(target) ? target : undefined;
+  const axesTarget = scalarTarget ? undefined : target as { x: MotionValue<number>; y: MotionValue<number> };
+  const axis = options.axis ?? (scalarTarget ? 'x' : 'any'); const pan = panRecognizer({ axis, threshold: options.threshold, propagate: options.propagate });
+  const arena = new GestureArena(element, [pan], { listen: options.dragListener, capture: options.capture, touchAction: options.touchAction ?? (axis === 'x' ? 'pan-y' : axis === 'y' ? 'pan-x' : 'none'), predict: options.predict });
+  const isDragging = new MotionValue<boolean>(false); const values: Partial<Record<'x' | 'y', MotionValue<number>>> = scalarTarget ? { [axis === 'y' ? 'y' : 'x']: scalarTarget } : axesTarget!;
   let start = { x: values.x?.get() ?? 0, y: values.y?.get() ?? 0 }; let origin = start; let bounds = { x: [-Infinity, Infinity] as [number, number], y: [-Infinity, Infinity] as [number, number] }; let pending: { x?: number; y?: number } | null = null; let removeFrame: (() => void) | undefined; let last = start;
   const flush = () => { if (!pending) return false; if (pending.x != null) values.x?.set(pending.x); if (pending.y != null) values.y?.set(pending.y); pending = null; return false; };
   const write = (next: { x?: number; y?: number }) => { pending = { ...pending, ...next }; if (options.immediate) flush(); else if (!removeFrame) removeFrame = scheduler.add(() => { removeFrame = undefined; return flush(); }); };
@@ -71,9 +79,9 @@ export function drag(target: MotionValue<number> | { x: MotionValue<number>; y: 
     }
   });
   if (options.cursor) (element as HTMLElement).style.cursor = 'grab';
-  const oneDimensional = target instanceof MotionValue ? target : axis === 'y' ? target.y : target.x;
+  const oneDimensional = scalarTarget ?? (axis === 'y' ? axesTarget!.y : axesTarget!.x);
   const keyboardDispose = options.keyboard === false || !oneDimensional ? () => {} : installDragKeyboard(element, oneDimensional, { axis: axis === 'y' ? 'y' : 'x', min: numericBounds(options.bounds, element, axis === 'y' ? 'y' : 'x')[0], max: numericBounds(options.bounds, element, axis === 'y' ? 'y' : 'x')[1], step: options.step, label: options.ariaLabel, onCancel: () => { oneDimensional.spring(axis === 'y' ? origin.y : origin.x, options.snapTransition); } });
-  return { isDragging, start(nativeEvent) { const clone = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: nativeEvent.pointerId, pointerType: nativeEvent.pointerType, clientX: nativeEvent.clientX, clientY: nativeEvent.clientY, button: nativeEvent.button, buttons: nativeEvent.buttons, pressure: nativeEvent.pressure, isPrimary: nativeEvent.isPrimary }); element.dispatchEvent(clone); }, cancel() { arena.cancel(); values.x?.spring(origin.x, options.snapTransition); values.y?.spring(origin.y, options.snapTransition); }, dispose() { unsubscribe(); keyboardDispose(); arena.dispose(); removeFrame?.(); if (options.cursor) (element as HTMLElement).style.cursor = ''; } };
+  return { isDragging, start(nativeEvent) { arena.session.start(nativeEvent); }, cancel() { arena.cancel(); values.x?.spring(origin.x, options.snapTransition); values.y?.spring(origin.y, options.snapTransition); }, dispose() { unsubscribe(); keyboardDispose(); arena.dispose(); removeFrame?.(); if (options.cursor) (element as HTMLElement).style.cursor = ''; } };
 }
 
 export interface TransformGestureOptions { scale?: MotionValue<number>; rotation?: MotionValue<number>; x?: MotionValue<number>; y?: MotionValue<number>; scaleBounds?: [number, number]; elastic?: number; momentum?: boolean; doubleTapZoom?: number | false }

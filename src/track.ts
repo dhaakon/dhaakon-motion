@@ -101,8 +101,8 @@ export class Track<T extends MotionValueShape> implements TimelineItem {
 
   sampleAt(localMs: number, ctx?: RenderContext) {
     const spec = { duration: this.duration, delay: 0, repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction, reversed: false };
-    const { cycleTime } = sampleCycle(spec, localMs);
-    this.apply(this.valueAt(cycleTime), ctx);
+    const { progress, cycleTime } = sampleCycle(spec, localMs);
+    this.apply(this.valueAt(Number.isFinite(this.duration) ? progress * this.duration : cycleTime), ctx);
   }
 }
 

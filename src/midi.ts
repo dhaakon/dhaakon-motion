@@ -18,6 +18,7 @@ export const midi = {
 export function midiOutput(port: Pick<MIDIOutput, 'send'>, options: { name?: string } = {}): TransportOutput {
   return {
     name: options.name ?? 'midi',
+    supportsOffline: false,
     onTick(info) {
       for (const cue of info.cues ?? []) {
         const bytes = (cue.payload as { midi?: number[] } | undefined)?.midi;

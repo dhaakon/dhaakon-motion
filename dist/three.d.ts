@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { j as MotionValueShape, K as Keyframe, b as TrackOptions, c as Track, g as FrameInfo, a as TransportOutput } from './track-D8CkFR8E.js';
+import { Keyframe, TrackOptions, Track } from '@dhaakon/motion';
+import { M as MotionValueShape, d as FrameInfo, a as TransportOutput } from './transport-NA0I1mIJ.js';
 
 /** One `renderer.render()` (or `composer.render()`) per tick, after every value for that instant has been written. */
 declare function threeOutput(options: {

@@ -53,3 +53,13 @@ test('cameraTrack writes position, fov (with a projection-matrix update), and lo
   expect(camera.updateProjectionMatrix).toHaveBeenCalled();
   expect(camera.lookAt).toHaveBeenCalledWith(0, 1, 0);
 });
+
+test('camera roll does not accumulate when sampling the same frame or seeking backward', () => {
+  let roll = 0;
+  const camera = { position: { set() {} }, updateProjectionMatrix() {}, rotateZ(value: number) { roll += value; }, lookAt() { roll = 0; }, fov: 50 };
+  const track = cameraTrack(camera as never, [{ at: 0, value: { roll: 0 } }, { at: 100, value: { roll: 1 }, easing: 'linear' }]);
+  track.sampleAt(50); track.sampleAt(50);
+  expect(roll).toBe(.5);
+  track.sampleAt(20);
+  expect(roll).toBeCloseTo(.2);
+});

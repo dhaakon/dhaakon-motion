@@ -143,6 +143,7 @@ var midi = {
 function midiOutput(port, options = {}) {
   return {
     name: options.name ?? "midi",
+    supportsOffline: false,
     onTick(info) {
       for (const cue of info.cues ?? []) {
         const bytes = cue.payload?.midi;

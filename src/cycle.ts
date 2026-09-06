@@ -33,6 +33,10 @@ export function totalDuration(spec: Pick<CycleSpec, 'duration' | 'delay' | 'repe
  */
 export function sampleCycle(spec: CycleSpec, milliseconds: number): CycleSample {
   const active = Math.max(0, milliseconds - spec.delay);
+  // An infinite content span never reaches a repeat boundary. Handle it
+  // before the finite-cycle arithmetic, where `0 * Infinity` would otherwise
+  // turn an ordinary finite sample time into NaN.
+  if (spec.duration === Infinity) return { iteration: 0, cycleTime: active, progress: 0, active };
   const cycleDuration = spec.duration + spec.repeatDelay;
   const iteration = spec.duration === 0
     ? spec.repeat

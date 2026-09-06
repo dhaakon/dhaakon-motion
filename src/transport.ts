@@ -166,7 +166,12 @@ export class Transport {
   toggle(): this { return this._state === 'playing' ? this.pause() : this.play(); }
 
   seek(to: TimeInput, options: { cues?: 'fire' | 'skip' } = {}): this {
-    let target = Math.max(0, Math.min(this.boundedDuration(), parseTime(to, this.frameRate)));
+    // An infinite root has no finite endpoint, but finite absolute seeks are
+    // still meaningful (and sample the appropriate repeat iteration).
+    let target = Math.max(0, Math.min(this.duration, parseTime(to, this.frameRate)));
+    // Clamp infinities when there is a finite bound, preserving the existing
+    // `seek(Infinity)` shorthand for the end; only an unbounded result is invalid.
+    if (!Number.isFinite(target)) return this;
     // Loop ranges are half-open: their upper bound is the next lap's first instant.
     // Mapping an exact seek keeps frame `b` from leaking between `b - 1f` and `a`.
     if (this.loopRegion && target === this.loopRegion[1]) {
@@ -233,6 +238,9 @@ export class Transport {
 
   dispose(): void {
     this.removeFrame?.();
+    this.removeFrame = undefined;
+    // Effect reattachment must not leave a canceled clock claiming to play.
+    if (this._state === 'playing') this._state = 'paused';
     for (const output of this.outputs) output.onDetach?.();
     this.outputs.clear();
     this.listeners.clear();
@@ -274,6 +282,9 @@ export class Transport {
           this.renderAt(b, false, { emit: false, direction: -1 });
         }
       }
+      // Consume only new laps. Keep the unquantized remainder in the anchor so
+      // snapping cannot lose sub-frame time or replay old crossings next tick.
+      this.anchorTime += remaining - rawTime;
       this._time = Math.max(a, Math.min(b, remaining));
       this.renderAt(this._time, true, { direction: this._rate >= 0 ? 1 : -1, carriedCues });
       return;

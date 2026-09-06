@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import { Track, type Keyframe, type TrackOptions } from './track';
+import { Track, type Keyframe, type TrackOptions } from '@dhaakon/motion';
 import type { MotionValueShape } from './interpolate';
 import type { FrameInfo, TransportOutput } from './transport';
 
@@ -86,14 +86,18 @@ export function cameraTrack(
   keyframes: Keyframe<CameraKeyframeValue>[],
   options: Omit<TrackOptions<CameraKeyframeValue>, 'keyframes' | 'apply' | 'target'> = {},
 ): Track<CameraKeyframeValue> {
+  let previousRoll = 0;
   return new Track<CameraKeyframeValue>({
     ...options,
     keyframes,
     apply: (value) => {
       if (value.position) camera.position.set(...value.position);
       if (value.fov != null) { camera.fov = value.fov; camera.updateProjectionMatrix(); }
-      if (value.target) camera.lookAt(...value.target);
-      if (value.roll != null) camera.rotateZ(value.roll);
+      if (value.target) { camera.lookAt(...value.target); previousRoll = 0; }
+      if (value.roll != null) {
+        camera.rotateZ(value.roll - previousRoll);
+        previousRoll = value.roll;
+      }
     },
   });
 }

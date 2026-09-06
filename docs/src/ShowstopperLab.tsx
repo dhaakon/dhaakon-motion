@@ -134,7 +134,9 @@ export function ShowstopperLab() {
     const rig = new THREE.Group(); scene.add(rig);
     const material = new THREE.MeshStandardMaterial({ color: '#2d62ff', emissive: '#ff5a1f', emissiveIntensity: .2, metalness: .62, roughness: .2, wireframe: false });
     const hero = new THREE.Mesh(new THREE.TorusKnotGeometry(1.45, .38, 180, 24, 2, 5), material); rig.add(hero);
-    const cage = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(2.45, 1)), new THREE.LineBasicMaterial({ color: '#d9ff43', transparent: true, opacity: .28 })); rig.add(cage);
+    const cageSource = new THREE.IcosahedronGeometry(2.45, 1);
+    const cage = new THREE.LineSegments(new THREE.EdgesGeometry(cageSource), new THREE.LineBasicMaterial({ color: '#d9ff43', transparent: true, opacity: .28 })); rig.add(cage);
+    cageSource.dispose();
     const floor = new THREE.GridHelper(22, 28, '#2d62ff', '#182033'); floor.position.y = -2.3; scene.add(floor);
     const key = new THREE.PointLight('#ff5a1f', 35, 30); key.position.set(3, 4, 5); scene.add(key); const rim = new THREE.PointLight('#2d62ff', 24, 25); rim.position.set(-4, 1, -2); scene.add(rim);
     const starsGeometry = new THREE.BufferGeometry(); const positions = new Float32Array(900 * 3); for (let i = 0; i < positions.length; i += 3) { positions[i] = (Math.random() - .5) * 22; positions[i + 1] = (Math.random() - .5) * 12; positions[i + 2] = (Math.random() - .5) * 18; } starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3)); const stars = new THREE.Points(starsGeometry, new THREE.PointsMaterial({ color: '#f0eee8', size: .025, transparent: true, opacity: .5 })); scene.add(stars);
@@ -158,7 +160,19 @@ export function ShowstopperLab() {
     const resize = () => { const rect = viewport.getBoundingClientRect(); renderer.setSize(rect.width, rect.height, false); camera.aspect = rect.width / Math.max(1, rect.height); camera.updateProjectionMatrix(); }; const observer = new ResizeObserver(resize); observer.observe(viewport); resize();
     const off = show.subscribe(() => { const entry = trace.entries.at(-1); if (entry && entry.frame % 8 === 0) setTraceText(`#${entry.tick} · ${entry.frame}f · ${entry.durationMs.toFixed(2)}ms · ${entry.cues.join(', ') || 'no cue'}`); });
     if (!disposed) { setTransport(show); show.play(); }
-    return () => { disposed = true; off(); detach.forEach((fn) => fn()); observer.disconnect(); show.dispose(); setTransport(null); renderer.dispose(); material.dispose(); starsGeometry.dispose(); (stars.material as THREE.Material).dispose(); viewport.removeChild(renderer.domElement); audioRef.current?.oscillator.stop(); audioRef.current?.context.close(); audioRef.current = null; };
+    return () => {
+      disposed = true; off(); detach.forEach((fn) => fn()); observer.disconnect(); show.dispose();
+      scene.traverse((object) => {
+        const renderable = object as THREE.Mesh;
+        renderable.geometry?.dispose();
+        const materials = Array.isArray(renderable.material) ? renderable.material : renderable.material ? [renderable.material] : [];
+        materials.forEach((item) => item.dispose());
+      });
+      renderer.dispose(); renderer.forceContextLoss(); renderer.domElement.remove();
+      audioRef.current?.oscillator.stop();
+      void audioRef.current?.context.close();
+      audioRef.current = null;
+    };
   }, []);
 
   const enableAudio = () => {

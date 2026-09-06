@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { GestureArena, cooperateWithScroll, hoverRecognizer, panRecognizer, pinchRecognizer, pressRecognizer, tapRecognizer, wheelRecognizer } from '@dhaakon/motion/gesture';
+import { GestureArena, cooperateWithScroll, hoverRecognizer, longPressRecognizer, panRecognizer, pinchRecognizer, pressRecognizer, tapRecognizer, wheelRecognizer } from '@dhaakon/motion/gesture';
 import { installPointerEvents, pointer } from '@dhaakon/motion/testing';
 
 let restore = () => {};
@@ -13,6 +13,30 @@ test('a four-pixel click sweeps to tap while pan never begins', () => {
   const arena = new GestureArena(element, [tap, pan]); const stream = pointer(element);
   stream.down(0, 0, 0); stream.move(4, 0, 20); stream.up(4, 0, 40);
   expect(tapped).toEqual(['ended']); expect(panned).toEqual([]); arena.dispose();
+});
+
+test('long press claims at its timer threshold and cancels a competing tap', () => {
+  vi.useFakeTimers();
+  const element = document.createElement('div'); document.body.append(element);
+  const tap = tapRecognizer({ maxDuration: 1000 }); const longPress = longPressRecognizer({ duration: 400 }); const press = pressRecognizer(); const events: string[] = [];
+  tap.subscribe((event) => events.push(`tap:${event.phase}`)); longPress.subscribe((event) => events.push(`longPress:${event.phase}`)); press.subscribe((event) => events.push(`press:${event.phase}`));
+  const claims: string[] = []; element.addEventListener('dhaakon-motion:arena', (event) => { claims.push((event as CustomEvent).detail.kind); });
+  const arena = new GestureArena(element, [tap, longPress, press]); const stream = pointer(element);
+  stream.down(0, 0, 0); vi.advanceTimersByTime(400);
+  expect(claims).toEqual(['longPress']); expect(tap.state).toBe('cancelled');
+  stream.up(0, 0, 450);
+  expect(events.filter((event) => event.startsWith('tap:'))).toEqual([]);
+  expect(events.filter((event) => event.startsWith('longPress:'))).toEqual(['longPress:began', 'longPress:changed', 'longPress:ended']);
+  arena.dispose();
+});
+
+test('press remains simultaneous with a quick tap', () => {
+  const element = document.createElement('div'); document.body.append(element);
+  const tap = tapRecognizer(); const press = pressRecognizer(); const events: string[] = [];
+  tap.subscribe((event) => events.push(`tap:${event.phase}`)); press.subscribe((event) => events.push(`press:${event.phase}`));
+  const arena = new GestureArena(element, [tap, press]); const stream = pointer(element);
+  stream.down(0, 0, 0); stream.up(0, 0, 20);
+  expect(events).toContain('tap:ended'); expect(events).toContain('press:ended'); arena.dispose();
 });
 
 test('pan axis arbitration claims the matching direction and yields the wrong one', () => {
@@ -58,4 +82,3 @@ test('hover ignores touch and wheel detects a decaying inertial series', () => {
   element.dispatchEvent(new WheelEvent('wheel', { deltaY: 20 })); element.dispatchEvent(new WheelEvent('wheel', { deltaY: 10 }));
   expect(hoverEvents).toEqual(['began']); expect(inertia).toEqual([false, true]); arena.dispose();
 });
-

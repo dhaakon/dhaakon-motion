@@ -1,3 +1,27 @@
+type FrameTask = (time: number) => boolean | void;
+interface FrameDriver {
+    request(callback: (time: number) => void): unknown;
+    cancel(id: unknown): void;
+    now(): number;
+}
+declare class FrameScheduler {
+    private driver;
+    private tasks;
+    private frame;
+    constructor(driver?: FrameDriver);
+    get size(): number;
+    now(): number;
+    add(task: FrameTask): () => void;
+    delete(task: FrameTask): void;
+    flush(time?: number): void;
+    clear(): void;
+    /** Swap the underlying time/frame source (used by tests). Cancels any pending frame and re-wakes on the new driver if tasks are active. */
+    setDriver(driver: FrameDriver): void;
+    private wake;
+    private tick;
+}
+declare const scheduler: FrameScheduler;
+
 /** A rational frame rate: `num / den` frames per second, with an optional SMPTE drop-frame flag. */
 interface FrameRate {
     readonly num: number;
@@ -43,12 +67,27 @@ declare function parseTime(input: TimeInput, rate?: FrameRateInput): number;
 /** Format milliseconds for display. `'frames'` and `'timecode'` styles require `rate`. */
 declare function formatTime(ms: number, rate?: FrameRateInput, style?: 'ms' | 'seconds' | 'frames' | 'timecode'): string;
 
-type MotionPrimitive = number | string | boolean;
-type MotionValueShape = MotionPrimitive | MotionPrimitive[] | {
-    [key: string]: MotionValueShape | undefined;
-};
-declare const mix: (from: number, to: number, progress: number) => number;
-declare function interpolate<T extends MotionValueShape>(from: T, to: T, progress: number): T;
+interface Timecode {
+    hours: number;
+    minutes: number;
+    seconds: number;
+    frames: number;
+    dropFrame: boolean;
+}
+/** Parse `'HH:MM:SS:FF'` (`;` before FF marks drop-frame) and validate it against `rate`. */
+declare function parseTimecode(text: string, rate: FrameRate): Timecode;
+/** Convert a timecode into an absolute frame index, applying the SMPTE drop-frame correction when `rate.dropFrame` is set. */
+declare function timecodeToFrames(tc: Timecode, rate: FrameRate): number;
+/** Convert an absolute frame index into a timecode, applying the SMPTE drop-frame correction when `rate.dropFrame` is set. */
+declare function framesToTimecode(frame: number, rate: FrameRate): Timecode;
+/** Format a `Timecode` as `'HH:MM:SS:FF'`, or `'HH:MM:SS;FF'` when it is drop-frame. */
+declare function formatTimecode(tc: Timecode): string;
+/** Convert milliseconds into a `Timecode` at `rate`. */
+declare function msToTimecode(ms: number, rate: FrameRate): Timecode;
+/** Convert a timecode (string or parsed `Timecode`) into milliseconds at `rate`. */
+declare function timecodeToMs(input: string | Timecode, rate: FrameRate): number;
+/** Add (or subtract, with a negative count) a number of frames to a timecode. */
+declare function addFrames(tc: Timecode, frames: number, rate: FrameRate): Timecode;
 
 type EasingFunction = (progress: number) => number;
 /** How an easing function was built, so `serializeEasing` can recover a JSON-safe description of it. */
@@ -95,6 +134,13 @@ declare function resolveEasing(easing?: EasingFunction | EasingName | EasingInpu
  */
 declare function serializeEasing(input: EasingInput | undefined): EasingInput | undefined;
 
+type MotionPrimitive = number | string | boolean;
+type MotionValueShape = MotionPrimitive | MotionPrimitive[] | {
+    [key: string]: MotionValueShape | undefined;
+};
+declare const mix: (from: number, to: number, progress: number) => number;
+declare function interpolate<T extends MotionValueShape>(from: T, to: T, progress: number): T;
+
 type Direction = 'normal' | 'reverse' | 'alternate' | 'alternate-reverse';
 interface CycleSpec {
     duration: number;
@@ -120,51 +166,108 @@ declare function totalDuration(spec: Pick<CycleSpec, 'duration' | 'delay' | 'rep
  */
 declare function sampleCycle(spec: CycleSpec, milliseconds: number): CycleSample;
 
-type FrameTask = (time: number) => boolean | void;
-interface FrameDriver {
-    request(callback: (time: number) => void): unknown;
-    cancel(id: unknown): void;
-    now(): number;
+/**
+ * The shared contract every timeline participant implements: tweens, tracks,
+ * nested timelines, and audio clips. A `Timeline` holds a flat list of these
+ * and drives them from one local clock.
+ */
+interface TimelineItem {
+    readonly kind: string;
+    name?: string;
+    /** Total occupied time in milliseconds, including delay and repeats. `Infinity` is allowed. */
+    readonly totalDuration: number;
+    /** Write values (and, for timelines, fire cues) for a local time. `ctx` carries direction and, when driven by a transport, frame/transport info. */
+    sampleAt(localMs: number, ctx?: RenderContext): void;
+    /** Adopt a parent timeline/transport timebase for authored frame and SMPTE literals. Explicit item rates still win. */
+    bindFrameRate?(rate: FrameRateInput): void;
+    /** Clear any "already fired" state (cue `once`, crossing history) so the next sample starts fresh. */
+    reset?(): void;
 }
-declare class FrameScheduler {
-    private driver;
-    private tasks;
-    private frame;
-    constructor(driver?: FrameDriver);
-    get size(): number;
-    now(): number;
-    add(task: FrameTask): () => void;
-    delete(task: FrameTask): void;
-    flush(time?: number): void;
-    clear(): void;
-    /** Swap the underlying time/frame source (used by tests). Cancels any pending frame and re-wakes on the new driver if tasks are active. */
-    setDriver(driver: FrameDriver): void;
-    private wake;
-    private tick;
+interface RenderContext {
+    direction: 1 | -1;
+    fireCues: boolean;
+    frame?: FrameInfo;
+    transport?: Transport;
 }
-declare const scheduler: FrameScheduler;
+declare const defaultRenderContext: RenderContext;
+/** A named, zero-duration position on a timeline. Labels created with `.label()` are markers too. */
+interface Marker {
+    kind: 'marker';
+    name: string;
+    time: number;
+    color?: string;
+    payload?: unknown;
+}
+/** What a cue or region handler receives when it fires. */
+interface CueEvent {
+    name: string;
+    time: number;
+    direction: 1 | -1;
+    payload: unknown;
+    timeline: Timeline;
+    frame: FrameInfo | undefined;
+}
+interface CueOptions {
+    payload?: unknown;
+    /** Fire at most once; call `timeline.reset()` (or replay from the start) to re-arm it. */
+    once?: boolean;
+    onEnter?(e: CueEvent): void;
+    onExit?(e: CueEvent): void;
+}
 
-interface Timecode {
-    hours: number;
-    minutes: number;
-    seconds: number;
-    frames: number;
-    dropFrame: boolean;
+/** One value at a point in time. `easing` describes the segment *ending* at this key (ignored on the first key). */
+interface Keyframe<T> {
+    at: TimeInput;
+    value: T;
+    easing?: EasingInput;
 }
-/** Parse `'HH:MM:SS:FF'` (`;` before FF marks drop-frame) and validate it against `rate`. */
-declare function parseTimecode(text: string, rate: FrameRate): Timecode;
-/** Convert a timecode into an absolute frame index, applying the SMPTE drop-frame correction when `rate.dropFrame` is set. */
-declare function timecodeToFrames(tc: Timecode, rate: FrameRate): number;
-/** Convert an absolute frame index into a timecode, applying the SMPTE drop-frame correction when `rate.dropFrame` is set. */
-declare function framesToTimecode(frame: number, rate: FrameRate): Timecode;
-/** Format a `Timecode` as `'HH:MM:SS:FF'`, or `'HH:MM:SS;FF'` when it is drop-frame. */
-declare function formatTimecode(tc: Timecode): string;
-/** Convert milliseconds into a `Timecode` at `rate`. */
-declare function msToTimecode(ms: number, rate: FrameRate): Timecode;
-/** Convert a timecode (string or parsed `Timecode`) into milliseconds at `rate`. */
-declare function timecodeToMs(input: string | Timecode, rate: FrameRate): number;
-/** Add (or subtract, with a negative count) a number of frames to a timecode. */
-declare function addFrames(tc: Timecode, frames: number, rate: FrameRate): Timecode;
+interface TrackOptions<T extends MotionValueShape> {
+    keyframes: Keyframe<T>[];
+    /** How a sampled value is written. Required unless `target` is given. */
+    apply?: (value: T, ctx?: RenderContext) => void;
+    /** Convenience for `apply: (v) => target.set(v)`. */
+    target?: MotionValue<T>;
+    name?: string;
+    /** Resolves frame/timecode `at` values. */
+    frameRate?: FrameRateInput;
+    repeat?: number;
+    repeatDelay?: TimeInput;
+    direction?: Direction;
+    /** Default easing for every segment that doesn't specify its own. */
+    easing?: EasingInput;
+}
+/** A multi-keyframe animation track — the N-keyframe generalization of a two-key `Tween`. */
+declare class Track<T extends MotionValueShape> implements TimelineItem {
+    readonly kind: "track";
+    name?: string;
+    private resolvedKeyframes;
+    private authoredKeyframes;
+    private segments;
+    private apply;
+    private repeat;
+    private repeatDelay;
+    private repeatDelayInput;
+    private direction;
+    private explicitRateInput?;
+    private inheritedRateInput?;
+    private defaultEasing?;
+    constructor(options: TrackOptions<T>);
+    get keyframes(): readonly {
+        at: number;
+        value: T;
+    }[];
+    get frameRate(): FrameRate;
+    bindFrameRate(rate: FrameRateInput): void;
+    private resolveTiming;
+    /** Content length: the last keyframe's time. */
+    get duration(): number;
+    get totalDuration(): number;
+    /** Pure: the interpolated value at a content-local time, without writing it anywhere. */
+    valueAt(ms: number): T;
+    sampleAt(localMs: number, ctx?: RenderContext): void;
+}
+/** `new Track({ target, keyframes, ...options })`, accepting either a `MotionValue` or a plain setter as the first argument. */
+declare function track<T extends MotionValueShape>(target: MotionValue<T> | ((value: T) => void), keyframes: Keyframe<T>[], options?: Omit<TrackOptions<T>, 'keyframes' | 'apply' | 'target'>): Track<T>;
 
 type VelocityShape<T> = T extends number ? number : T extends readonly unknown[] ? {
     [K in keyof T]: number;
@@ -523,8 +626,10 @@ declare class Timeline implements TimelineItem {
     pause(): this;
     stop(): this;
     reverse(): this;
-    /** `progress` is a 0..1 fraction of `totalDuration`, matching the pre-0.4 API. */
+    /** `progress` is a 0..1 fraction of finite total duration; an infinite repeat addresses one authored content cycle. */
     seek(progress: number): this;
+    /** Infinite repeats seek within one authored content cycle, like `Tween.seek()`. */
+    private get seekDuration();
     loop(value?: boolean): this;
     sampleAt(localMs: number, ctx?: RenderContext): number;
     /** Alias of `sampleAt` for absolute (not delay-relative) callers, matching the pre-0.4 API. */
@@ -681,107 +786,4 @@ declare class Transport {
     private newFinished;
 }
 
-/**
- * The shared contract every timeline participant implements: tweens, tracks,
- * nested timelines, and audio clips. A `Timeline` holds a flat list of these
- * and drives them from one local clock.
- */
-interface TimelineItem {
-    readonly kind: string;
-    name?: string;
-    /** Total occupied time in milliseconds, including delay and repeats. `Infinity` is allowed. */
-    readonly totalDuration: number;
-    /** Write values (and, for timelines, fire cues) for a local time. `ctx` carries direction and, when driven by a transport, frame/transport info. */
-    sampleAt(localMs: number, ctx?: RenderContext): void;
-    /** Adopt a parent timeline/transport timebase for authored frame and SMPTE literals. Explicit item rates still win. */
-    bindFrameRate?(rate: FrameRateInput): void;
-    /** Clear any "already fired" state (cue `once`, crossing history) so the next sample starts fresh. */
-    reset?(): void;
-}
-interface RenderContext {
-    direction: 1 | -1;
-    fireCues: boolean;
-    frame?: FrameInfo;
-    transport?: Transport;
-}
-declare const defaultRenderContext: RenderContext;
-/** A named, zero-duration position on a timeline. Labels created with `.label()` are markers too. */
-interface Marker {
-    kind: 'marker';
-    name: string;
-    time: number;
-    color?: string;
-    payload?: unknown;
-}
-/** What a cue or region handler receives when it fires. */
-interface CueEvent {
-    name: string;
-    time: number;
-    direction: 1 | -1;
-    payload: unknown;
-    timeline: Timeline;
-    frame: FrameInfo | undefined;
-}
-interface CueOptions {
-    payload?: unknown;
-    /** Fire at most once; call `timeline.reset()` (or replay from the start) to re-arm it. */
-    once?: boolean;
-    onEnter?(e: CueEvent): void;
-    onExit?(e: CueEvent): void;
-}
-
-/** One value at a point in time. `easing` describes the segment *ending* at this key (ignored on the first key). */
-interface Keyframe<T> {
-    at: TimeInput;
-    value: T;
-    easing?: EasingInput;
-}
-interface TrackOptions<T extends MotionValueShape> {
-    keyframes: Keyframe<T>[];
-    /** How a sampled value is written. Required unless `target` is given. */
-    apply?: (value: T, ctx?: RenderContext) => void;
-    /** Convenience for `apply: (v) => target.set(v)`. */
-    target?: MotionValue<T>;
-    name?: string;
-    /** Resolves frame/timecode `at` values. */
-    frameRate?: FrameRateInput;
-    repeat?: number;
-    repeatDelay?: TimeInput;
-    direction?: Direction;
-    /** Default easing for every segment that doesn't specify its own. */
-    easing?: EasingInput;
-}
-/** A multi-keyframe animation track — the N-keyframe generalization of a two-key `Tween`. */
-declare class Track<T extends MotionValueShape> implements TimelineItem {
-    readonly kind: "track";
-    name?: string;
-    private resolvedKeyframes;
-    private authoredKeyframes;
-    private segments;
-    private apply;
-    private repeat;
-    private repeatDelay;
-    private repeatDelayInput;
-    private direction;
-    private explicitRateInput?;
-    private inheritedRateInput?;
-    private defaultEasing?;
-    constructor(options: TrackOptions<T>);
-    get keyframes(): readonly {
-        at: number;
-        value: T;
-    }[];
-    get frameRate(): FrameRate;
-    bindFrameRate(rate: FrameRateInput): void;
-    private resolveTiming;
-    /** Content length: the last keyframe's time. */
-    get duration(): number;
-    get totalDuration(): number;
-    /** Pure: the interpolated value at a content-local time, without writing it anywhere. */
-    valueAt(ms: number): T;
-    sampleAt(localMs: number, ctx?: RenderContext): void;
-}
-/** `new Track({ target, keyframes, ...options })`, accepting either a `MotionValue` or a plain setter as the first argument. */
-declare function track<T extends MotionValueShape>(target: MotionValue<T> | ((value: T) => void), keyframes: Keyframe<T>[], options?: Omit<TrackOptions<T>, 'keyframes' | 'apply' | 'target'>): Track<T>;
-
-export { type TransportState as $, type FrameTask as A, InertiaItem as B, type Clock as C, type Direction as D, type EasingInput as E, type FrameRateInput as F, type InertiaItemOptions as G, type InspectNode as H, type InertiaOptions as I, type Marker as J, type Keyframe as K, Line as L, MotionValue as M, type MotionPrimitive as N, type PropertyRange as O, type PhysicsSpringOptions as P, type SpringItemOptions as Q, type RenderContext as R, SpringItem as S, type TimelineItem as T, type SpringOptions as U, type Timecode as V, type TimelineOptions as W, type TimelinePosition as X, type Trace as Y, type TraceEntry as Z, type TransportOptions as _, type TransportOutput as a, type TweenState as a0, type VelocityShape as a1, activeDuration as a2, addFrames as a3, clampWithRubberband as a4, createTrace as a5, defaultRenderContext as a6, formatTime as a7, formatTimecode as a8, frameRate as a9, frameToMs as aa, framesToTimecode as ab, interpolate as ac, mix as ad, msToFrame as ae, msToTimecode as af, parseTime as ag, parseTimecode as ah, projectFling as ai, registerEasing as aj, resolveEasing as ak, rubberband as al, sampleCycle as am, scheduler as an, serializeEasing as ao, snapTo as ap, snapToFrame as aq, springDuration as ar, steps as as, stiffnessFor as at, timecodeToFrames as au, timecodeToMs as av, totalDuration as aw, track as ax, type TrackOptions as b, Track as c, Transport as d, Timeline as e, type TimeInput as f, type FrameInfo as g, type CueEvent as h, type TweenOptions as i, type MotionValueShape as j, type EasingFunction as k, Tween as l, animate as m, cubicBezier as n, spring as o, type CueOptions as p, type CycleSample as q, type CycleSpec as r, stagger as s, Easing as t, type EasingName as u, type EasingTuple as v, type FrameDriver as w, type FrameRate as x, FrameRates as y, FrameScheduler as z };
+export { type TransportState as $, type FrameTask as A, type InertiaItemOptions as B, type CueEvent as C, type Direction as D, type EasingInput as E, type FrameRateInput as F, type InertiaOptions as G, type InspectNode as H, InertiaItem as I, type Marker as J, type Keyframe as K, Line as L, type MotionValueShape as M, type MotionPrimitive as N, type PropertyRange as O, type PhysicsSpringOptions as P, type SpringItemOptions as Q, type RenderContext as R, SpringItem as S, Transport as T, type SpringOptions as U, type Timecode as V, type TimelineOptions as W, type TimelinePosition as X, type Trace as Y, type TraceEntry as Z, type TransportOptions as _, type TransportOutput as a, type TweenState as a0, type VelocityShape as a1, activeDuration as a2, addFrames as a3, clampWithRubberband as a4, createTrace as a5, defaultRenderContext as a6, formatTime as a7, formatTimecode as a8, frameRate as a9, frameToMs as aa, framesToTimecode as ab, interpolate as ac, mix as ad, msToFrame as ae, msToTimecode as af, parseTime as ag, parseTimecode as ah, projectFling as ai, registerEasing as aj, resolveEasing as ak, rubberband as al, sampleCycle as am, scheduler as an, serializeEasing as ao, snapTo as ap, snapToFrame as aq, springDuration as ar, steps as as, stiffnessFor as at, timecodeToFrames as au, timecodeToMs as av, totalDuration as aw, track as ax, type TimeInput as b, Timeline as c, type FrameInfo as d, type TrackOptions as e, Track as f, type TweenOptions as g, MotionValue as h, type EasingFunction as i, type TimelineItem as j, Tween as k, animate as l, cubicBezier as m, spring as n, type Clock as o, type CueOptions as p, type CycleSample as q, type CycleSpec as r, stagger as s, Easing as t, type EasingName as u, type EasingTuple as v, type FrameDriver as w, type FrameRate as x, FrameRates as y, FrameScheduler as z };

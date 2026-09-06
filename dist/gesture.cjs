@@ -88,9 +88,9 @@ function createPointerSession(options) {
     options.onSample(sample, pointers);
     return sample;
   };
-  const attach = () => {
+  const attach = (external = false) => {
     if (listenerTarget) return;
-    listenerTarget = capture ? element : document;
+    listenerTarget = external || !capture ? document : element;
     listenerTarget.addEventListener("pointermove", onMove, listenerOptions);
     listenerTarget.addEventListener("pointerup", onUp, listenerOptions);
     listenerTarget.addEventListener("pointercancel", onCancel, listenerOptions);
@@ -124,9 +124,9 @@ function createPointerSession(options) {
       preventScroll(false);
     }
   };
-  function onDown(event) {
-    if (disposed || !options.secondaryButtons && event.pointerType === "mouse" && event.button !== 0) return;
-    attach();
+  function begin(event, external = false) {
+    if (disposed || pointers.has(event.pointerId) || !options.secondaryButtons && event.pointerType === "mouse" && event.button !== 0) return;
+    attach(external);
     push(event);
     if (capture) {
       try {
@@ -134,6 +134,9 @@ function createPointerSession(options) {
       } catch {
       }
     }
+  }
+  function onDown(event) {
+    begin(event);
   }
   function onMove(event) {
     if (!pointers.has(event.pointerId)) return;
@@ -166,15 +169,18 @@ function createPointerSession(options) {
   function onVisibility() {
     if (document.visibilityState === "hidden") cancelAll();
   }
-  element.addEventListener("pointerdown", onDown, listenerOptions);
+  if (options.listen !== false) element.addEventListener("pointerdown", onDown, listenerOptions);
   return {
     pointers,
     preventScroll,
+    start(event) {
+      begin(event, true);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
       cancelAll();
-      element.removeEventListener("pointerdown", onDown, listenerOptions);
+      if (options.listen !== false) element.removeEventListener("pointerdown", onDown, listenerOptions);
       if (styled.style && options.touchAction !== "inherit") styled.style.touchAction = previousTouchAction ?? "";
       if (styled.style) styled.style.webkitUserSelect = previousSelect ?? "";
     }
@@ -201,19 +207,19 @@ var VelocityEstimator = class {
     this.trim(t);
     return this;
   }
-  velocity(now2 = this.samples.at(-1)?.t ?? 0) {
+  velocity(now = this.samples.at(-1)?.t ?? 0) {
     const latest = this.samples.at(-1);
-    if (!latest || now2 - latest.t > 60) return { x: 0, y: 0 };
+    if (!latest || now - latest.t > 60) return { x: 0, y: 0 };
     const previous = this.samples.at(-2);
     if (!previous || latest.t - previous.t > 60) return { x: 0, y: 0 };
-    this.trim(now2);
+    this.trim(now);
     if (this.samples.length < 2) return { x: 0, y: 0 };
     let weightSum = 0;
     let timeMean = 0;
     let xMean = 0;
     let yMean = 0;
     for (const sample of this.samples) {
-      const weight = Math.exp(-(now2 - sample.t) / 40);
+      const weight = Math.exp(-(now - sample.t) / 40);
       weightSum += weight;
       timeMean += sample.t * weight;
       xMean += sample.x * weight;
@@ -226,7 +232,7 @@ var VelocityEstimator = class {
     let xNumerator = 0;
     let yNumerator = 0;
     for (const sample of this.samples) {
-      const weight = Math.exp(-(now2 - sample.t) / 40);
+      const weight = Math.exp(-(now - sample.t) / 40);
       const dt = sample.t - timeMean;
       denominator += weight * dt * dt;
       xNumerator += weight * dt * (sample.x - xMean);
@@ -238,8 +244,8 @@ var VelocityEstimator = class {
   reset() {
     this.samples.length = 0;
   }
-  trim(now2) {
-    while (this.samples.length && now2 - this.samples[0].t > this.window) this.samples.shift();
+  trim(now) {
+    while (this.samples.length && now - this.samples[0].t > this.window) this.samples.shift();
   }
 };
 
@@ -298,7 +304,6 @@ var TapRecognizer = class extends BaseRecognizer {
     super({ priority: options.priority ?? 20, ...options });
     this.options = options;
   }
-  options;
   kind = "tap";
   started = 0;
   valid = true;
@@ -336,7 +341,6 @@ var LongPressRecognizer = class extends BaseRecognizer {
     super({ priority: options.priority ?? 15, ...options });
     this.options = options;
   }
-  options;
   kind = "longPress";
   timer;
   sample;
@@ -397,7 +401,6 @@ var PanRecognizer = class extends BaseRecognizer {
     super({ priority: options.priority ?? 10, preventsScroll: options.preventsScroll ?? true, ...options });
     this.options = options;
   }
-  options;
   kind = "pan";
   locked;
   scrollGuard;
@@ -453,7 +456,6 @@ var SwipeRecognizer = class extends BaseRecognizer {
     super({ priority: options.priority ?? 11, ...options });
     this.options = options;
   }
-  options;
   kind = "swipe";
   onMove(sample) {
     this.track(sample);
@@ -627,11 +629,14 @@ var GestureArena = class {
     this.element = element;
     this.recognizers = recognizers;
     arenas.set(element, this);
-    for (const recognizer of recognizers) if (recognizer.attach) this.extras.push(recognizer.attach(element));
+    for (const recognizer of recognizers) {
+      if (recognizer.attach) this.extras.push(recognizer.attach(element));
+      if (recognizer.kind === "longPress") this.extras.push(recognizer.subscribe((event) => {
+        if (event.phase === "began" && !this.disposed && !this.winner) this.claim(recognizer);
+      }));
+    }
     this.session = createPointerSession({ element, ...options, onSample: (sample, pointers) => this.handleSample(sample, { pointers }), onEnd: (sample, cancelled) => this.handleEnd(sample, cancelled) });
   }
-  element;
-  recognizers;
   session;
   winner;
   disposed = false;
@@ -786,1082 +791,15 @@ function installDragKeyboard(element, value, options = {}) {
   };
 }
 
-// src/easing.ts
-var clamp = (n) => Math.min(1, Math.max(0, n));
-var easingSource = /* @__PURE__ */ new WeakMap();
-function cubicBezier(x1, y1, x2, y2) {
-  const sample = (a, b, t) => 3 * a * (1 - t) ** 2 * t + 3 * b * (1 - t) * t ** 2 + t ** 3;
-  const fn = (progress) => {
-    const x = clamp(progress);
-    let low = 0;
-    let high = 1;
-    let t = x;
-    for (let i = 0; i < 12; i += 1) {
-      const estimate = sample(x1, x2, t);
-      if (Math.abs(estimate - x) < 1e-4) break;
-      if (estimate < x) low = t;
-      else high = t;
-      t = (low + high) / 2;
-    }
-    return sample(y1, y2, t);
-  };
-  easingSource.set(fn, ["cubicBezier", x1, y1, x2, y2]);
-  return fn;
-}
-function spring(options = {}) {
-  const { stiffness = 170, damping = 26, mass = 1 } = options;
-  const omega = Math.sqrt(stiffness / mass);
-  const ratio = damping / (2 * Math.sqrt(stiffness * mass));
-  const duration = 1;
-  const response = (t) => {
-    if (ratio < 1) {
-      const damped = omega * Math.sqrt(1 - ratio * ratio);
-      return 1 - Math.exp(-ratio * omega * t) * (Math.cos(damped * t) + ratio * omega / damped * Math.sin(damped * t));
-    }
-    return 1 - Math.exp(-omega * t) * (1 + omega * t);
-  };
-  const end = response(duration) || 1;
-  const fn = (t) => response(clamp(t) * duration) / end;
-  easingSource.set(fn, ["spring", options]);
-  return fn;
-}
-function steps(count, position = "end") {
-  const n = Math.max(1, Math.round(count));
-  const fn = (t) => {
-    const x = clamp(t);
-    const step = position === "start" ? Math.ceil(x * n) : Math.floor(x * n);
-    return Math.min(1, Math.max(0, step / n));
-  };
-  easingSource.set(fn, ["steps", n]);
-  return fn;
-}
-var Easing = {
-  linear: (t) => t,
-  easeInQuad: (t) => t * t,
-  easeOutQuad: (t) => t * (2 - t),
-  easeInOutQuad: (t) => t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2,
-  easeInCubic: (t) => t ** 3,
-  easeOutCubic: (t) => 1 - (1 - t) ** 3,
-  easeInOutCubic: (t) => t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2,
-  easeInQuart: (t) => t ** 4,
-  easeOutQuart: (t) => 1 - (1 - t) ** 4,
-  easeInOutQuart: (t) => t < 0.5 ? 8 * t ** 4 : 1 - (-2 * t + 2) ** 4 / 2,
-  easeOutBack: (t) => 1 + 2.70158 * (t - 1) ** 3 + 1.70158 * (t - 1) ** 2,
-  dhaakon: cubicBezier(0.16, 1, 0.3, 1)
-};
-var builtinNames = new Map(
-  Object.entries(Easing).map(([name, fn]) => [fn, name])
-);
-var registry = /* @__PURE__ */ new Map();
-function resolveEasing(easing) {
-  if (!easing) return Easing.dhaakon;
-  if (typeof easing === "function") return easing;
-  if (typeof easing === "string") {
-    if (easing in Easing) return Easing[easing];
-    const registered = registry.get(easing);
-    if (registered) return registered;
-    throw new Error(`Unknown easing: "${easing}"`);
-  }
-  const [kind, ...args] = easing;
-  if (kind === "cubicBezier") return cubicBezier(...args);
-  if (kind === "spring") return spring(args[0]);
-  if (kind === "steps") return steps(args[0]);
-  throw new Error(`Unknown easing tuple: ${JSON.stringify(easing)}`);
-}
-
-// src/interpolate.ts
-var unit = /^(-?(?:\d+\.?\d*|\.\d+))([a-z%]*)$/i;
-function parseColor(value) {
-  const hex = value.trim().match(/^#([\da-f]{3,8})$/i)?.[1];
-  if (hex) {
-    const expanded = hex.length <= 4 ? [...hex].map((c) => c + c).join("") : hex;
-    if (expanded.length === 6 || expanded.length === 8) return [
-      parseInt(expanded.slice(0, 2), 16),
-      parseInt(expanded.slice(2, 4), 16),
-      parseInt(expanded.slice(4, 6), 16),
-      expanded.length === 8 ? parseInt(expanded.slice(6, 8), 16) / 255 : 1
-    ];
-  }
-  const rgb = value.trim().match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)$/i);
-  return rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3]), rgb[4] == null ? 1 : Number(rgb[4])] : null;
-}
-var mix = (from, to, progress) => from + (to - from) * progress;
-function interpolate(from, to, progress) {
-  if (typeof from === "number" && typeof to === "number") return mix(from, to, progress);
-  if (typeof from === "string" && typeof to === "string") {
-    const fromColor = parseColor(from);
-    const toColor = parseColor(to);
-    if (fromColor && toColor) {
-      const [r, g, b2, a2] = fromColor.map((v, i) => mix(v, toColor[i], progress));
-      return `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b2)}, ${Number(a2.toFixed(3))})`;
-    }
-    const a = from.match(unit);
-    const b = to.match(unit);
-    if (a && b && a[2] === b[2]) return `${Number(mix(Number(a[1]), Number(b[1]), progress).toFixed(5))}${a[2]}`;
-    return progress < 1 ? from : to;
-  }
-  if (Array.isArray(from) && Array.isArray(to)) return from.map((value, index) => interpolate(value, to[index] ?? value, progress));
-  if (from && to && typeof from === "object" && typeof to === "object") {
-    const output = {};
-    for (const key of /* @__PURE__ */ new Set([...Object.keys(from), ...Object.keys(to)])) {
-      const a = from[key];
-      const b = to[key];
-      output[key] = a == null ? b : b == null ? a : interpolate(a, b, progress);
-    }
-    return output;
-  }
-  return progress < 1 ? from : to;
-}
-
-// src/scheduler.ts
-var now = () => globalThis.performance?.now?.() ?? Date.now();
-var driver = {
-  request: typeof globalThis.requestAnimationFrame === "function" ? (callback) => globalThis.requestAnimationFrame(callback) : (callback) => globalThis.setTimeout(() => callback(now()), 16),
-  cancel: typeof globalThis.cancelAnimationFrame === "function" ? (id) => globalThis.cancelAnimationFrame(id) : (id) => globalThis.clearTimeout(id),
-  now
-};
-var FrameScheduler = class {
-  constructor(driver2 = globalThisDriver) {
-    this.driver = driver2;
-  }
-  driver;
-  tasks = /* @__PURE__ */ new Set();
-  frame = null;
-  get size() {
-    return this.tasks.size;
-  }
-  now() {
-    return this.driver.now();
-  }
-  add(task) {
-    this.tasks.add(task);
-    this.wake();
-    return () => this.delete(task);
-  }
-  delete(task) {
-    this.tasks.delete(task);
-    if (!this.tasks.size && this.frame != null) {
-      this.driver.cancel(this.frame);
-      this.frame = null;
-    }
-  }
-  flush(time = this.now()) {
-    for (const task of [...this.tasks]) if (task(time) === false) this.tasks.delete(task);
-  }
-  clear() {
-    this.tasks.clear();
-    if (this.frame != null) this.driver.cancel(this.frame);
-    this.frame = null;
-  }
-  /** Swap the underlying time/frame source (used by tests). Cancels any pending frame and re-wakes on the new driver if tasks are active. */
-  setDriver(driver2) {
-    if (this.frame != null) this.driver.cancel(this.frame);
-    this.frame = null;
-    this.driver = driver2;
-    if (this.tasks.size) this.wake();
-  }
-  wake() {
-    if (this.frame == null) this.frame = this.driver.request(this.tick);
-  }
-  tick = (time) => {
-    this.frame = null;
-    this.flush(time);
-    if (this.tasks.size) this.wake();
-  };
-};
-var globalThisDriver = driver;
-var scheduler = new FrameScheduler(globalThisDriver);
-
-// src/cycle.ts
-function activeDuration(spec) {
-  if (spec.repeat === Infinity) return Infinity;
-  return spec.duration * (spec.repeat + 1) + spec.repeatDelay * spec.repeat;
-}
-function totalDuration(spec) {
-  return spec.delay + activeDuration(spec);
-}
-function sampleCycle(spec, milliseconds) {
-  const active = Math.max(0, milliseconds - spec.delay);
-  const cycleDuration = spec.duration + spec.repeatDelay;
-  const iteration = spec.duration === 0 ? spec.repeat : Math.min(spec.repeat, Math.floor(active / Math.max(1, cycleDuration)));
-  const cycleTime = Math.min(spec.duration, Math.max(0, active - iteration * cycleDuration));
-  let raw = spec.duration === 0 ? 1 : cycleTime / spec.duration;
-  const alternating = spec.direction === "alternate" || spec.direction === "alternate-reverse";
-  const startsReverse = spec.direction === "reverse" || spec.direction === "alternate-reverse";
-  if (startsReverse !== (alternating && iteration % 2 === 1) !== spec.reversed) raw = 1 - raw;
-  const progress = Math.max(0, Math.min(1, raw));
-  return { iteration, cycleTime, progress, active };
-}
-
-// src/timecode.ts
-function dropCount(fpsRounded) {
-  return fpsRounded / 15;
-}
-var TC_RE = /^(\d{1,2}):(\d{2}):(\d{2})([:;])(\d{1,2})$/;
-function parseTimecode(text, rate) {
-  const match = text.trim().match(TC_RE);
-  if (!match) throw new Error(`Invalid timecode: "${text}"`);
-  const [, h, m, s, sep, f] = match;
-  const dropFrame = sep === ";";
-  if (dropFrame && !rate.dropFrame) {
-    throw new Error(`Timecode "${text}" uses ';' (drop-frame) but the frame rate ${rate.label} is not drop-frame`);
-  }
-  const hours = Number(h);
-  const minutes = Number(m);
-  const seconds = Number(s);
-  const frames = Number(f);
-  const fpsRounded = Math.round(rate.fps);
-  if (minutes > 59 || seconds > 59) throw new Error(`Invalid timecode "${text}": minutes and seconds must be 0-59`);
-  if (frames >= fpsRounded) throw new Error(`Invalid timecode "${text}": frames must be 0-${fpsRounded - 1} at ${rate.label}`);
-  if (rate.dropFrame) {
-    const df = dropCount(fpsRounded);
-    const isDroppedInstant = minutes % 10 !== 0 && seconds === 0 && frames < df;
-    if (isDroppedInstant) {
-      throw new Error(`Invalid drop-frame timecode "${text}": frame ${frames} is dropped at the start of minute ${minutes}`);
-    }
-  }
-  return { hours, minutes, seconds, frames, dropFrame };
-}
-function timecodeToFrames(tc, rate) {
-  const fpsRounded = Math.round(rate.fps);
-  const totalMinutes = 60 * tc.hours + tc.minutes;
-  let frame = fpsRounded * 3600 * tc.hours + fpsRounded * 60 * tc.minutes + fpsRounded * tc.seconds + tc.frames;
-  if (rate.dropFrame) {
-    frame -= dropCount(fpsRounded) * (totalMinutes - Math.floor(totalMinutes / 10));
-  }
-  return frame;
-}
-function framesToTimecode(frame, rate) {
-  const fpsRounded = Math.round(rate.fps);
-  if (!rate.dropFrame) {
-    const framesPart2 = (frame % fpsRounded + fpsRounded) % fpsRounded;
-    const totalSeconds2 = Math.floor(frame / fpsRounded);
-    const secondsPart2 = (totalSeconds2 % 60 + 60) % 60;
-    const totalMinutes2 = Math.floor(totalSeconds2 / 60);
-    const minutesPart2 = (totalMinutes2 % 60 + 60) % 60;
-    const hoursPart2 = Math.floor(totalMinutes2 / 60);
-    return { hours: hoursPart2, minutes: minutesPart2, seconds: secondsPart2, frames: framesPart2, dropFrame: false };
-  }
-  const df = dropCount(fpsRounded);
-  const framesPer24Hours = fpsRounded * 3600 * 24;
-  const framesPer10Minutes = Math.round(rate.fps * 60 * 10);
-  const framesPerMinute = fpsRounded * 60 - df;
-  let f = (frame % framesPer24Hours + framesPer24Hours) % framesPer24Hours;
-  const tenMinuteBlocks = Math.floor(f / framesPer10Minutes);
-  const remainder = f % framesPer10Minutes;
-  f += remainder > df ? df * 9 * tenMinuteBlocks + df * Math.floor((remainder - df) / framesPerMinute) : df * 9 * tenMinuteBlocks;
-  const framesPart = f % fpsRounded;
-  const totalSeconds = Math.floor(f / fpsRounded);
-  const secondsPart = totalSeconds % 60;
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const minutesPart = totalMinutes % 60;
-  const hoursPart = Math.floor(totalMinutes / 60);
-  return { hours: hoursPart, minutes: minutesPart, seconds: secondsPart, frames: framesPart, dropFrame: true };
-}
-function msToTimecode(ms, rate) {
-  return framesToTimecode(msToFrame(ms, rate), rate);
-}
-function timecodeToMs(input, rate) {
-  const tc = typeof input === "string" ? parseTimecode(input, rate) : input;
-  return frameToMs(timecodeToFrames(tc, rate), rate);
-}
-
-// src/time.ts
-var gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
-function trimFps(fps) {
-  return String(Math.round(fps * 1e3) / 1e3);
-}
-function buildFrameRate(num, den, dropFrame) {
-  if (!Number.isFinite(num) || !Number.isFinite(den) || num <= 0 || den <= 0) {
-    throw new Error(`Invalid frame rate: ${num}/${den}`);
-  }
-  const divisor = gcd(Math.round(num), Math.round(den)) || 1;
-  const n = Math.round(num) / divisor;
-  const d = Math.round(den) / divisor;
-  if (dropFrame && !(n === 3e4 && d === 1001 || n === 6e4 && d === 1001)) {
-    throw new Error(`Drop-frame timecode is only valid at 29.97 or 59.94 fps, got ${n}/${d} (${trimFps(n / d)} fps)`);
-  }
-  const fps = n / d;
-  return { num: n, den: d, dropFrame, fps, label: dropFrame ? `${trimFps(fps)}df` : trimFps(fps) };
-}
-var NTSC_TABLE = [
-  { fps: 24e3 / 1001, num: 24e3, den: 1001 },
-  { fps: 3e4 / 1001, num: 3e4, den: 1001 },
-  { fps: 6e4 / 1001, num: 6e4, den: 1001 }
-];
-function frameRateFromNumber(numeric, dropFrame) {
-  if (!Number.isFinite(numeric) || numeric <= 0) throw new Error(`Invalid frame rate: ${numeric}`);
-  const ntsc = NTSC_TABLE.find((entry) => Math.abs(entry.fps - numeric) < 1e-3);
-  if (ntsc) return buildFrameRate(ntsc.num, ntsc.den, dropFrame);
-  if (Number.isInteger(numeric)) return buildFrameRate(numeric, 1, dropFrame);
-  return buildFrameRate(Math.round(numeric * 1e3), 1e3, dropFrame);
-}
-function frameRateFromString(text) {
-  const trimmed = text.trim();
-  const dropFrame = /df$/i.test(trimmed);
-  const numeric = Number(trimmed.replace(/df$/i, ""));
-  return frameRateFromNumber(numeric, dropFrame);
-}
-var FrameRates = {
-  "23.976": buildFrameRate(24e3, 1001, false),
-  "24": buildFrameRate(24, 1, false),
-  "25": buildFrameRate(25, 1, false),
-  "29.97": buildFrameRate(3e4, 1001, false),
-  "29.97df": buildFrameRate(3e4, 1001, true),
-  "30": buildFrameRate(30, 1, false),
-  "50": buildFrameRate(50, 1, false),
-  "59.94": buildFrameRate(6e4, 1001, false),
-  "59.94df": buildFrameRate(6e4, 1001, true),
-  "60": buildFrameRate(60, 1, false)
-};
-function frameRate(input) {
-  if (typeof input === "number") return frameRateFromNumber(input, false);
-  if (typeof input === "string") return frameRateFromString(input);
-  if (input && typeof input === "object" && "num" in input) {
-    return buildFrameRate(input.num, input.den ?? 1, Boolean(input.dropFrame));
-  }
-  throw new Error(`Invalid frame rate: ${JSON.stringify(input)}`);
-}
-var FRAME_EPSILON = 1e-6;
-function frameToMs(frame, rate) {
-  return frame * 1e3 * rate.den / rate.num;
-}
-function msToFrame(ms, rate) {
-  return Math.floor(ms * rate.num / (1e3 * rate.den) + FRAME_EPSILON);
-}
-var FRAMES_RE = /^(-?\d+(?:\.\d+)?)f$/i;
-var SECONDS_RE = /^(-?\d+(?:\.\d+)?)s$/i;
-var MS_RE = /^(-?\d+(?:\.\d+)?)ms$/i;
-var TIMECODE_RE = /^\d{1,2}:\d{2}:\d{2}[:;]\d{1,2}$/;
-function parseTime(input, rate) {
-  if (typeof input === "number") return input;
-  const text = input.trim();
-  const framesMatch = text.match(FRAMES_RE);
-  if (framesMatch) {
-    if (rate == null) throw new Error(`parseTime: "${input}" is a frame value and needs a frameRate`);
-    return frameToMs(Number(framesMatch[1]), frameRate(rate));
-  }
-  const secondsMatch = text.match(SECONDS_RE);
-  if (secondsMatch) return Number(secondsMatch[1]) * 1e3;
-  const msMatch = text.match(MS_RE);
-  if (msMatch) return Number(msMatch[1]);
-  if (TIMECODE_RE.test(text)) {
-    if (rate == null) throw new Error(`parseTime: "${input}" is a timecode and needs a frameRate`);
-    return timecodeToMs(text, frameRate(rate));
-  }
-  const plain = Number(text);
-  if (text !== "" && Number.isFinite(plain)) return plain;
-  throw new Error(`parseTime: unrecognized time value "${input}"`);
-}
-
-// src/track.ts
-var Track = class {
-  kind = "track";
-  name;
-  resolvedKeyframes = [];
-  authoredKeyframes;
-  segments = [];
-  apply;
-  repeat;
-  repeatDelay;
-  repeatDelayInput;
-  direction;
-  explicitRateInput;
-  inheritedRateInput;
-  defaultEasing;
-  constructor(options) {
-    if (!options.apply && !options.target) throw new Error("Track needs either `apply` or `target`.");
-    this.name = options.name;
-    this.apply = options.apply ?? ((value) => options.target.set(value));
-    this.repeat = options.repeat ?? 0;
-    this.repeatDelayInput = options.repeatDelay ?? 0;
-    this.repeatDelay = 0;
-    this.direction = options.direction ?? "normal";
-    this.explicitRateInput = options.frameRate;
-    this.defaultEasing = options.easing;
-    this.authoredKeyframes = options.keyframes.map((key) => ({ ...key }));
-    if (!options.keyframes.length) throw new Error("Track needs at least one keyframe.");
-    this.resolveTiming();
-  }
-  get keyframes() {
-    return this.resolvedKeyframes;
-  }
-  get frameRate() {
-    const authored = [...this.authoredKeyframes.map((keyframe) => keyframe.at), this.repeatDelayInput];
-    const provisional = authored.some((input) => typeof input === "string" && input.includes(";")) ? "29.97df" : 60;
-    return frameRate(this.explicitRateInput ?? this.inheritedRateInput ?? provisional);
-  }
-  bindFrameRate(rate) {
-    this.inheritedRateInput = rate;
-    this.resolveTiming();
-  }
-  resolveTiming() {
-    const rate = this.frameRate;
-    const resolved = this.authoredKeyframes.map((key) => ({ at: parseTime(key.at, rate), value: key.value, easing: key.easing })).sort((a, b) => a.at - b.at);
-    this.resolvedKeyframes = resolved.map(({ at, value }) => ({ at, value }));
-    this.repeatDelay = Math.max(0, parseTime(this.repeatDelayInput, rate));
-    this.segments = [];
-    for (let i = 1; i < resolved.length; i += 1) {
-      this.segments.push({ from: resolved[i - 1].at, to: resolved[i].at, ease: resolveEasing(resolved[i].easing ?? this.defaultEasing) });
-    }
-  }
-  /** Content length: the last keyframe's time. */
-  get duration() {
-    return this.keyframes.at(-1)?.at ?? 0;
-  }
-  get totalDuration() {
-    return totalDuration({ duration: this.duration, delay: 0, repeat: this.repeat, repeatDelay: this.repeatDelay });
-  }
-  /** Pure: the interpolated value at a content-local time, without writing it anywhere. */
-  valueAt(ms) {
-    const first = this.keyframes[0];
-    const last = this.keyframes.at(-1);
-    if (this.keyframes.length === 1 || ms <= first.at) return first.value;
-    if (ms >= last.at) return last.value;
-    const index = this.segments.findIndex((segment2) => ms <= segment2.to);
-    const segment = this.segments[index === -1 ? this.segments.length - 1 : index];
-    const from = this.keyframes[index];
-    const to = this.keyframes[index + 1];
-    const span2 = segment.to - segment.from;
-    const t = span2 <= 0 ? 1 : (ms - segment.from) / span2;
-    return interpolate(from.value, to.value, segment.ease(Math.max(0, Math.min(1, t))));
-  }
-  sampleAt(localMs, ctx) {
-    const spec = { duration: this.duration, delay: 0, repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction, reversed: false };
-    const { cycleTime } = sampleCycle(spec, localMs);
-    this.apply(this.valueAt(cycleTime), ctx);
-  }
-};
-
-// src/physics.ts
-function springConstants(options, distance = 1) {
-  const mass = Math.max(1e-4, options.mass ?? 1);
-  const bounce = Math.max(0, Math.min(1, options.bounce ?? 0));
-  const duration = options.duration == null ? void 0 : Math.max(1, parseTime(options.duration, frameRate(options.frameRate ?? 60)));
-  const stiffness = duration == null ? Math.max(1e-4, options.stiffness ?? 170) : stiffnessFor(duration, bounce, mass);
-  const damping = options.damping ?? (duration == null ? 26 : 2 * (1 - bounce * 0.82) * Math.sqrt(stiffness * mass));
-  return { mass, stiffness, damping: Math.max(0, damping), distance };
-}
-function scalarSpring(from, to, velocityMs, milliseconds, options) {
-  const t = Math.max(0, milliseconds) / 1e3;
-  const v0 = velocityMs * 1e3;
-  const y0 = from - to;
-  const { mass, stiffness, damping } = springConstants(options, Math.abs(y0));
-  const omega0 = Math.sqrt(stiffness / mass);
-  const alpha = damping / (2 * mass);
-  let y;
-  let velocity;
-  if (alpha < omega0 - 1e-7) {
-    const wd = Math.sqrt(omega0 * omega0 - alpha * alpha);
-    const b = (v0 + alpha * y0) / wd;
-    const cos = Math.cos(wd * t);
-    const sin = Math.sin(wd * t);
-    const decay = Math.exp(-alpha * t);
-    y = decay * (y0 * cos + b * sin);
-    velocity = decay * ((-alpha * y0 + b * wd) * cos + (-alpha * b - y0 * wd) * sin);
-  } else if (alpha > omega0 + 1e-7) {
-    const root = Math.sqrt(alpha * alpha - omega0 * omega0);
-    const r1 = -alpha + root;
-    const r2 = -alpha - root;
-    const a = (v0 - r2 * y0) / (r1 - r2);
-    const b = y0 - a;
-    y = a * Math.exp(r1 * t) + b * Math.exp(r2 * t);
-    velocity = a * r1 * Math.exp(r1 * t) + b * r2 * Math.exp(r2 * t);
-  } else {
-    const b = v0 + alpha * y0;
-    const decay = Math.exp(-alpha * t);
-    y = (y0 + b * t) * decay;
-    velocity = (b - alpha * (y0 + b * t)) * decay;
-  }
-  return { value: to + y, velocity: velocity / 1e3 };
-}
-function numericVelocity(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-function mapSpring(from, to, velocity, time, options) {
-  if (typeof from === "number" && typeof to === "number") return scalarSpring(from, to, numericVelocity(velocity), time, options);
-  if (Array.isArray(from) && Array.isArray(to)) {
-    const states = from.map((item, index) => mapSpring(item, to[index] ?? item, Array.isArray(velocity) ? velocity[index] : 0, time, options));
-    return { value: states.map((state) => state.value), velocity: states.map((state) => state.velocity) };
-  }
-  if (from && to && typeof from === "object" && typeof to === "object") {
-    const values = {};
-    const velocities = {};
-    const v = velocity && typeof velocity === "object" ? velocity : {};
-    for (const key of /* @__PURE__ */ new Set([...Object.keys(from), ...Object.keys(to)])) {
-      const a = from[key];
-      const b = to[key];
-      if (a == null || b == null) {
-        values[key] = b ?? a;
-        velocities[key] = 0;
-        continue;
-      }
-      const state = mapSpring(a, b, v[key], time, options);
-      values[key] = state.value;
-      velocities[key] = state.velocity;
-    }
-    return { value: values, velocity: velocities };
-  }
-  return { value: time <= 0 ? from : to, velocity: 0 };
-}
-function maxMagnitude(value) {
-  if (typeof value === "number") return Math.abs(value);
-  if (Array.isArray(value)) return Math.max(0, ...value.map(maxMagnitude));
-  if (value && typeof value === "object") return Math.max(0, ...Object.values(value).map(maxMagnitude));
-  return 0;
-}
-function difference(a, b) {
-  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b);
-  if (Array.isArray(a) && Array.isArray(b)) return Math.max(0, ...a.map((v, i) => difference(v, b[i])));
-  if (a && b && typeof a === "object" && typeof b === "object") return Math.max(0, ...Object.keys(a).map((key) => difference(a[key], b[key])));
-  return Object.is(a, b) ? 0 : Infinity;
-}
-var PhysicsItem = class {
-  constructor(apply, scheduler_) {
-    this.apply = apply;
-    this.frameLoop = scheduler_ ?? scheduler;
-    this.finished = new Promise((resolve) => {
-      this.resolveFinished = resolve;
-    });
-  }
-  apply;
-  name;
-  frameLoop;
-  startedAt = 0;
-  removeFrame;
-  resolveFinished;
-  finished;
-  elapsed = 0;
-  isAnimating = false;
-  play() {
-    if (this.isAnimating) return this;
-    this.isAnimating = true;
-    this.startedAt = this.frameLoop.now() - this.elapsed;
-    this.removeFrame = this.frameLoop.add(this.advance);
-    return this;
-  }
-  pause() {
-    this.removeFrame?.();
-    this.isAnimating = false;
-    return this;
-  }
-  cancel() {
-    this.removeFrame?.();
-    this.isAnimating = false;
-    this.resolveFinished(this);
-    return this;
-  }
-  seekTime(milliseconds) {
-    this.elapsed = Math.max(0, Math.min(this.totalDuration, milliseconds));
-    this.sampleAt(this.elapsed);
-    if (this.isAnimating) this.startedAt = this.frameLoop.now() - this.elapsed;
-    return this;
-  }
-  advance = (time) => {
-    this.elapsed = Math.min(this.totalDuration, Math.max(0, time - this.startedAt));
-    this.sampleAt(this.elapsed);
-    if (this.elapsed < this.totalDuration) return true;
-    this.isAnimating = false;
-    this.resolveFinished(this);
-    return false;
-  };
-};
-var SpringItem = class extends PhysicsItem {
-  kind = "spring";
-  from;
-  to;
-  initialVelocity;
-  options;
-  totalDuration;
-  value;
-  velocity;
-  constructor(options) {
-    super(options.onUpdate, options.scheduler);
-    this.name = options.name;
-    this.from = options.from;
-    this.to = options.to;
-    this.initialVelocity = options.velocity ?? 0;
-    this.options = options;
-    this.value = this.from;
-    this.velocity = this.initialVelocity;
-    this.totalDuration = springDuration({ ...options, from: this.from, to: this.to, velocity: this.initialVelocity });
-    if (options.autoplay) queueMicrotask(() => this.play());
-  }
-  sampleAt(milliseconds) {
-    const time = Math.max(0, Math.min(this.totalDuration, milliseconds));
-    const state = mapSpring(this.from, this.to, this.initialVelocity, time, this.options);
-    if (time >= this.totalDuration) {
-      this.value = this.to;
-      this.velocity = 0;
-    } else {
-      this.value = state.value;
-      this.velocity = state.velocity;
-    }
-    this.apply?.(this.value, this.velocity, time);
-    return this.value;
-  }
-};
-var InertiaItem = class extends PhysicsItem {
-  kind = "inertia";
-  from;
-  initialVelocity;
-  options;
-  totalDuration;
-  target;
-  value;
-  velocity;
-  boundary;
-  crossingTime = 0;
-  settle;
-  constructor(options) {
-    super(options.onUpdate, options.scheduler);
-    this.name = options.name;
-    this.from = options.from;
-    this.initialVelocity = options.velocity ?? 0;
-    this.options = options;
-    this.value = this.from;
-    this.velocity = this.initialVelocity;
-    const tau = Math.max(1, options.timeConstant ?? 325);
-    const power = options.power ?? 0.8;
-    if (typeof this.from === "number") {
-      const projected = projectFling(this.from, numericVelocity(this.initialVelocity) * power, tau);
-      const modified = options.modifyTarget?.(projected) ?? projected;
-      this.target = modified;
-      const bound = modified < (options.min ?? -Infinity) ? options.min : modified > (options.max ?? Infinity) ? options.max : void 0;
-      if (bound != null && options.bounce !== false) {
-        this.boundary = bound;
-        const distance = bound - this.from;
-        const full = numericVelocity(this.initialVelocity) * power * tau;
-        const ratio = full === 0 ? 1 : Math.max(0, Math.min(0.999999, distance / full));
-        this.crossingTime = Math.max(0, -tau * Math.log(1 - ratio));
-        const crossingVelocity = numericVelocity(this.initialVelocity) * power * Math.exp(-this.crossingTime / tau);
-        this.settle = new SpringItem({ from: bound, to: bound, velocity: crossingVelocity, ...typeof options.bounce === "object" ? options.bounce : {}, scheduler: options.scheduler });
-      }
-    } else this.target = this.from;
-    const rest = Math.max(1e-5, options.restDelta ?? 0.01);
-    const v = Math.abs(numericVelocity(this.initialVelocity) * power);
-    const decayDuration = v <= rest ? 0 : Math.max(0, tau * Math.log(v / rest));
-    this.totalDuration = this.settle ? this.crossingTime + this.settle.totalDuration : decayDuration;
-    if (options.autoplay) queueMicrotask(() => this.play());
-  }
-  sampleAt(milliseconds) {
-    const time = Math.max(0, Math.min(this.totalDuration, milliseconds));
-    if (typeof this.from !== "number") {
-      this.apply?.(this.value, this.velocity, time);
-      return this.value;
-    }
-    if (this.settle && this.boundary != null && time >= this.crossingTime) {
-      this.value = this.settle.sampleAt(time - this.crossingTime);
-      this.velocity = this.settle.velocity;
-    } else {
-      const tau = Math.max(1, this.options.timeConstant ?? 325);
-      const v0 = numericVelocity(this.initialVelocity) * (this.options.power ?? 0.8);
-      this.value = this.from + v0 * tau * (1 - Math.exp(-time / tau));
-      this.velocity = v0 * Math.exp(-time / tau);
-      if (!this.settle && time >= this.totalDuration) {
-        this.value = this.target;
-        this.velocity = 0;
-      }
-    }
-    this.apply?.(this.value, this.velocity, time);
-    return this.value;
-  }
-};
-function springDuration(options = {}) {
-  const from = options.from ?? 0;
-  const to = options.to ?? 1;
-  const restDelta = options.restDelta ?? 0.01;
-  const restSpeed = options.restSpeed ?? 0.01;
-  let previous = 0;
-  for (let time = 0; time <= 2e4; time += 4) {
-    const state = mapSpring(from, to, options.velocity ?? 0, time, options);
-    if (difference(state.value, to) <= restDelta && maxMagnitude(state.velocity) <= restSpeed) {
-      let low = previous;
-      let high = time;
-      for (let i = 0; i < 12; i += 1) {
-        const mid = (low + high) / 2;
-        const sample = mapSpring(from, to, options.velocity ?? 0, mid, options);
-        if (difference(sample.value, to) <= restDelta && maxMagnitude(sample.velocity) <= restSpeed) high = mid;
-        else low = mid;
-      }
-      return high;
-    }
-    previous = time;
-  }
-  return 2e4;
-}
-function stiffnessFor(duration, bounce = 0, mass = 1) {
-  const seconds = Math.max(1e-3, duration / 1e3);
-  const dampingRatio = Math.max(0.08, 1 - Math.max(0, Math.min(1, bounce)) * 0.82);
-  return mass * (Math.log(100) / (dampingRatio * seconds)) ** 2;
-}
-function rubberband(value, min, max, coefficient = 0.55, dimension = 300) {
-  if (value >= min && value <= max) return value;
-  const boundary = value < min ? min : max;
-  const distance = Math.abs(value - boundary);
-  const resisted = (1 - 1 / (distance * coefficient / Math.max(1, dimension) + 1)) * Math.max(1, dimension);
-  return boundary + Math.sign(value - boundary) * resisted;
-}
-function clampWithRubberband(value, min, max, coefficient = 0.55, dimension = 300) {
-  return coefficient === false ? Math.max(min, Math.min(max, value)) : rubberband(value, min, max, coefficient, dimension);
-}
-function projectFling(value, velocity, timeConstant = 325) {
-  return value + velocity * timeConstant;
-}
-function snapTo(points, value, velocity, timeConstant = 325) {
-  const projected = projectFling(value, velocity, timeConstant);
-  if (typeof points === "function") return points(projected);
-  if (!Array.isArray(points)) {
-    const offset = points.offset ?? 0;
-    return Math.round((projected - offset) / points.step) * points.step + offset;
-  }
-  return points.reduce((nearest, point) => Math.abs(point - projected) < Math.abs(nearest - projected) ? point : nearest, points[0] ?? value);
-}
-
-// src/core.ts
-var Line = class {
-  curves;
-  constructor(start, end) {
-    if (start.length !== end.length) throw new Error(`Uneven amount of lines: ${start.length} != ${end.length}`);
-    this.curves = [start.slice(), end.slice()];
-  }
-  value(progress) {
-    return interpolate(this.curves[0], this.curves[1], progress);
-  }
-};
-var Tween = class {
-  static Line = Line;
-  kind = "tween";
-  name;
-  duration = 300;
-  delay = 0;
-  repeat = 0;
-  repeatDelay = 0;
-  direction = "normal";
-  state = "idle";
-  isAnimating = false;
-  isPaused = false;
-  isReversed = false;
-  node = null;
-  properties;
-  from = 0;
-  toValue = 1;
-  easing = resolveEasing();
-  onBegin;
-  onStart;
-  onUpdate;
-  onEnd;
-  onComplete;
-  value = this.from;
-  progress = 0;
-  elapsed = 0;
-  durationInput = 300;
-  delayInput = 0;
-  repeatDelayInput = 0;
-  explicitRateInput;
-  inheritedRateInput;
-  frameLoop = scheduler;
-  startedAt = 0;
-  removeFrame;
-  resolveFinished;
-  finished;
-  constructor(options = {}) {
-    this.finished = this.newFinishedPromise();
-    this.configure(options);
-    if (options.autoplay) queueMicrotask(() => this.play());
-  }
-  configure(options) {
-    const timingKeys = /* @__PURE__ */ new Set(["duration", "delay", "repeatDelay", "frameRate"]);
-    for (const [key, value] of Object.entries(options)) if (value !== void 0 && !timingKeys.has(key)) this[key] = value;
-    if (options.duration !== void 0) this.durationInput = options.duration;
-    if (options.delay !== void 0) this.delayInput = options.delay;
-    if (options.repeatDelay !== void 0) this.repeatDelayInput = options.repeatDelay;
-    if (options.frameRate !== void 0) this.explicitRateInput = options.frameRate;
-    this.resolveTiming();
-    if (options.scheduler) this.frameLoop = options.scheduler;
-    if (options.ease || options.easing) this.easing = resolveEasing(options.ease ?? options.easing);
-    if (options.yoyo) this.direction = "alternate";
-    if (options.curve instanceof Line) {
-      this.from = options.curve.curves[0];
-      this.toValue = options.curve.curves[1];
-    } else if (options.curve) [this.from, this.toValue] = options.curve;
-    if (options.from !== void 0) this.from = options.from;
-    if (options.to !== void 0) this.toValue = options.to;
-    if (options.properties) {
-      this.properties = options.properties;
-      this.from = Object.fromEntries(Object.entries(options.properties).map(([key, range]) => [key, range.start]));
-      this.toValue = Object.fromEntries(Object.entries(options.properties).map(([key, range]) => [key, range.end]));
-    }
-    this.value = this.from;
-    return this;
-  }
-  to(options) {
-    this.stop();
-    return this.configure(options);
-  }
-  play(options) {
-    if (options) this.configure(options);
-    if (this.isAnimating) return this;
-    if (this.state === "finished" || this.state === "cancelled") {
-      this.elapsed = 0;
-      this.finished = this.newFinishedPromise();
-    }
-    this.isAnimating = true;
-    this.isPaused = false;
-    this.state = this.elapsed < this.delay ? "delayed" : "running";
-    this.startedAt = this.frameLoop.now() - this.elapsed;
-    if (this.elapsed === 0) {
-      this.onBegin?.(this);
-      this.onStart?.(this);
-    }
-    this.removeFrame = this.frameLoop.add(this.advance);
-    return this;
-  }
-  pause() {
-    if (!this.isAnimating) return this;
-    this.removeFrame?.();
-    this.isAnimating = false;
-    this.isPaused = true;
-    this.state = "paused";
-    return this;
-  }
-  stop() {
-    this.removeFrame?.();
-    this.isAnimating = false;
-    this.isPaused = false;
-    this.state = "idle";
-    this.elapsed = 0;
-    this.sampleAt(0);
-    return this;
-  }
-  cancel() {
-    this.removeFrame?.();
-    this.isAnimating = false;
-    this.isPaused = false;
-    this.state = "cancelled";
-    this.resolveFinished(this);
-    return this;
-  }
-  reverse() {
-    const active = Math.max(0, this.elapsed - this.delay);
-    this.isReversed = !this.isReversed;
-    if (this.repeat === Infinity) {
-      const cycleDuration = Math.max(1, this.duration + this.repeatDelay);
-      const iteration = Math.floor(active / cycleDuration);
-      const cycleTime = Math.min(this.duration, Math.max(0, active - iteration * cycleDuration));
-      this.elapsed = this.delay + iteration * cycleDuration + Math.max(0, this.duration - cycleTime);
-    } else this.elapsed = this.delay + Math.max(0, this.activeDuration - active);
-    if (this.isAnimating) this.startedAt = this.frameLoop.now() - this.elapsed;
-    this.sampleAt(this.elapsed);
-    return this;
-  }
-  seek(progress) {
-    const seekDuration = this.repeat === Infinity ? this.duration : this.activeDuration;
-    return this.seekTime(this.delay + Math.max(0, Math.min(1, progress)) * seekDuration);
-  }
-  seekTime(milliseconds) {
-    if (!Number.isFinite(milliseconds)) return this;
-    this.elapsed = Math.max(0, Math.min(this.totalDuration, milliseconds));
-    this.sampleAt(this.elapsed);
-    if (this.isAnimating) this.startedAt = this.frameLoop.now() - this.elapsed;
-    return this;
-  }
-  setDuration(duration, rate) {
-    this.durationInput = duration;
-    if (rate !== void 0) this.explicitRateInput = rate;
-    this.resolveTiming();
-    return this;
-  }
-  /** Effective timebase for authored frame/SMPTE fields. A standalone `;` timecode provisionally implies 29.97df until attached. */
-  get frameRate() {
-    const authored = [this.durationInput, this.delayInput, this.repeatDelayInput];
-    const provisional = authored.some((input) => typeof input === "string" && input.includes(";")) ? "29.97df" : 60;
-    return frameRate(this.explicitRateInput ?? this.inheritedRateInput ?? provisional);
-  }
-  /** Called by Timeline/Transport attachment. An explicit `frameRate` option is never overwritten. */
-  bindFrameRate(rate) {
-    this.inheritedRateInput = rate;
-    this.resolveTiming();
-  }
-  /** The frame index the tween's active time falls in, at `rate` (default 60 fps). Floor-based: matches which frame is on screen. */
-  frameAt(rate = 60) {
-    return msToFrame(Math.max(0, this.elapsed - this.delay), frameRate(rate));
-  }
-  /** The SMPTE timecode for the tween's active time, at `rate`. */
-  timecodeAt(rate) {
-    return msToTimecode(Math.max(0, this.elapsed - this.delay), frameRate(rate));
-  }
-  getCurrentFrame(fps = 60) {
-    return this.frameAt(fps);
-  }
-  /** Analytic/numerically differentiated velocity of the current tween value, in units per millisecond. */
-  instantaneousVelocity() {
-    if (this.duration <= 0) return 0;
-    const epsilon = 1e-4;
-    const before = this.easing(Math.max(0, this.progress - epsilon));
-    const after = this.easing(Math.min(1, this.progress + epsilon));
-    const span2 = Math.min(1, this.progress + epsilon) - Math.max(0, this.progress - epsilon);
-    const slope = span2 > 0 ? (after - before) / span2 : 0;
-    return scaleVelocity(velocityBetween(this.from, this.toValue, this.duration), slope);
-  }
-  /**
-   * A two-keyframe `Track` equivalent to this tween's `from`/`to`/`duration`/`easing`/`repeat`/`repeatDelay`/`direction`.
-   * Its `apply` forwards sampled values to this tween's own `onUpdate` (progress is not recomputed — read `value` from the callback).
-   */
-  toTrack() {
-    return new Track({
-      name: this.name,
-      keyframes: [{ at: this.delay, value: this.from }, { at: this.delay + this.duration, value: this.toValue, easing: this.easing }],
-      repeat: this.repeat,
-      repeatDelay: this.repeatDelay,
-      direction: this.direction,
-      apply: (value) => {
-        this.value = value;
-        this.onUpdate?.(value, this.progress, this);
-      }
-    });
-  }
-  get activeDuration() {
-    return this.repeat === Infinity ? Infinity : this.duration * (this.repeat + 1) + this.repeatDelay * this.repeat;
-  }
-  get totalDuration() {
-    return this.delay + this.activeDuration;
-  }
-  sampleAt(milliseconds, _ctx) {
-    const { progress } = sampleCycle(
-      { duration: this.duration, delay: this.delay, repeat: this.repeat, repeatDelay: this.repeatDelay, direction: this.direction, reversed: this.isReversed },
-      milliseconds
-    );
-    this.progress = progress;
-    this.value = interpolate(this.from, this.toValue, this.easing(this.progress));
-    if (this.node && this.properties && typeof this.value === "object" && !Array.isArray(this.value)) {
-      for (const [key, value] of Object.entries(this.value)) this.node.style.setProperty(key, `${value}${this.properties[key]?.unit ?? ""}`);
-    }
-    this.onUpdate?.(this.value, this.progress, this);
-    return this.value;
-  }
-  advance = (time) => {
-    this.elapsed = Math.min(this.totalDuration, Math.max(0, time - this.startedAt));
-    this.state = this.elapsed < this.delay ? "delayed" : "running";
-    this.sampleAt(this.elapsed);
-    if (this.elapsed < this.totalDuration) return true;
-    this.isAnimating = false;
-    this.isPaused = false;
-    this.state = "finished";
-    this.onEnd?.(this);
-    this.onComplete?.(this);
-    this.resolveFinished(this);
-    return false;
-  };
-  resolveTiming() {
-    const rate = this.frameRate;
-    this.duration = Math.max(0, parseTime(this.durationInput, rate));
-    this.delay = Math.max(0, parseTime(this.delayInput, rate));
-    this.repeatDelay = Math.max(0, parseTime(this.repeatDelayInput, rate));
-  }
-  newFinishedPromise() {
-    return new Promise((resolve) => {
-      this.resolveFinished = resolve;
-    });
-  }
-};
-var MotionValue = class {
-  constructor(current) {
-    this.current = current;
-    this.previous = current;
-    this.updatedAtValue = scheduler.now();
-    this.previousAt = this.updatedAtValue;
-  }
-  current;
-  listeners = /* @__PURE__ */ new Set();
-  animation;
-  previous;
-  previousAt;
-  explicitVelocity;
-  updatedAtValue;
-  get() {
-    return this.current;
-  }
-  get updatedAt() {
-    return this.updatedAtValue;
-  }
-  get velocity() {
-    if (this.explicitVelocity !== void 0) return this.explicitVelocity;
-    const elapsed = this.updatedAt - this.previousAt;
-    if (elapsed <= 0 || elapsed > 50) return 0;
-    return velocityBetween(this.previous, this.current, elapsed);
-  }
-  set(value, time = scheduler.now()) {
-    const changed = !Object.is(value, this.current);
-    this.previous = this.current;
-    this.previousAt = this.updatedAt;
-    this.current = value;
-    this.updatedAtValue = time;
-    this.explicitVelocity = void 0;
-    if (changed) for (const listener of this.listeners) listener();
-  }
-  setWithVelocity(value, velocity, time = scheduler.now()) {
-    const changed = !Object.is(value, this.current);
-    this.previous = this.current;
-    this.previousAt = this.updatedAt;
-    this.current = value;
-    this.updatedAtValue = time;
-    this.explicitVelocity = velocity;
-    if (changed) for (const listener of this.listeners) listener();
-  }
-  subscribe = (listener) => {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  };
-  animate(to, options = {}) {
-    this.stop();
-    const tween = new Tween({ ...options, from: this.current, to, onUpdate: (value, _progress, active) => this.setWithVelocity(value, active.instantaneousVelocity(), active.elapsed) }).play();
-    this.animation = tween;
-    return tween;
-  }
-  spring(to, options = {}) {
-    this.stop();
-    const item = new SpringItem({ ...options, from: this.current, to, velocity: options.velocity ?? this.velocity, onUpdate: (value, velocity, time) => this.setWithVelocity(value, velocity, time), autoplay: true });
-    this.animation = item;
-    return item;
-  }
-  decay(options = {}) {
-    this.stop();
-    const item = new InertiaItem({ ...options, from: this.current, velocity: options.velocity ?? this.velocity, onUpdate: (value, velocity, time) => this.setWithVelocity(value, velocity, time), autoplay: true });
-    this.animation = item;
-    return item;
-  }
-  stop() {
-    this.animation?.cancel();
-    this.animation = void 0;
-  }
-};
-function velocityBetween(from, to, milliseconds) {
-  if (typeof from === "number" && typeof to === "number") return (to - from) / milliseconds;
-  if (Array.isArray(from) && Array.isArray(to)) return from.map((value, index) => velocityBetween(value, to[index] ?? value, milliseconds));
-  if (from && to && typeof from === "object" && typeof to === "object") {
-    const output = {};
-    for (const key of /* @__PURE__ */ new Set([...Object.keys(from), ...Object.keys(to)])) {
-      const a = from[key];
-      const b = to[key];
-      output[key] = a == null || b == null ? 0 : velocityBetween(a, b, milliseconds);
-    }
-    return output;
-  }
-  return 0;
-}
-function scaleVelocity(value, scale) {
-  if (typeof value === "number") return value * scale;
-  if (Array.isArray(value)) return value.map((entry) => scaleVelocity(entry, scale));
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, scaleVelocity(entry, scale)]));
-  return 0;
-}
-
 // src/gesture/bind.ts
+var import_motion = require("@dhaakon/motion");
 function reduced() {
   return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+function isMotionValue(value) {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value;
+  return typeof candidate.get === "function" && typeof candidate.set === "function" && typeof candidate.subscribe === "function" && typeof candidate.stop === "function" && typeof candidate.spring === "function" && typeof candidate.decay === "function";
 }
 function numericBounds(bounds, element, axis) {
   const resolved = typeof bounds === "function" ? bounds() : bounds;
@@ -1878,11 +816,13 @@ function cueThresholds(options) {
   return (options.cues ?? []).flatMap((cue) => (Array.isArray(cue.at) ? cue.at : [cue.at]).map((at) => ({ at, name: cue.name })));
 }
 function drag(target, element, options = {}) {
-  const axis = options.axis ?? (target instanceof MotionValue ? "x" : "any");
+  const scalarTarget = isMotionValue(target) ? target : void 0;
+  const axesTarget = scalarTarget ? void 0 : target;
+  const axis = options.axis ?? (scalarTarget ? "x" : "any");
   const pan = panRecognizer({ axis, threshold: options.threshold, propagate: options.propagate });
-  const arena = new GestureArena(element, [pan], { capture: options.capture, touchAction: options.touchAction ?? (axis === "x" ? "pan-y" : axis === "y" ? "pan-x" : "none"), predict: options.predict });
-  const isDragging = new MotionValue(false);
-  const values = target instanceof MotionValue ? { [axis === "y" ? "y" : "x"]: target } : target;
+  const arena = new GestureArena(element, [pan], { listen: options.dragListener, capture: options.capture, touchAction: options.touchAction ?? (axis === "x" ? "pan-y" : axis === "y" ? "pan-x" : "none"), predict: options.predict });
+  const isDragging = new import_motion.MotionValue(false);
+  const values = scalarTarget ? { [axis === "y" ? "y" : "x"]: scalarTarget } : axesTarget;
   let start = { x: values.x?.get() ?? 0, y: values.y?.get() ?? 0 };
   let origin = start;
   let bounds = { x: [-Infinity, Infinity], y: [-Infinity, Infinity] };
@@ -1899,7 +839,7 @@ function drag(target, element, options = {}) {
   const write = (next) => {
     pending = { ...pending, ...next };
     if (options.immediate) flush();
-    else if (!removeFrame) removeFrame = scheduler.add(() => {
+    else if (!removeFrame) removeFrame = import_motion.scheduler.add(() => {
       removeFrame = void 0;
       return flush();
     });
@@ -1913,15 +853,15 @@ function drag(target, element, options = {}) {
     const [min, max] = bounds[key];
     const noMotion = reduced();
     const momentum = noMotion ? false : options.momentum ?? true;
-    const projectedTarget = options.snap ? snapTo(options.snap, value.get(), velocity, typeof momentum === "object" ? momentum.timeConstant : void 0) : Math.max(min, Math.min(max, value.get()));
+    const projectedTarget = options.snap ? (0, import_motion.snapTo)(options.snap, value.get(), velocity, typeof momentum === "object" ? momentum.timeConstant : void 0) : Math.max(min, Math.min(max, value.get()));
     if (options.snap || value.get() < min || value.get() > max) {
       const target_ = Math.max(min, Math.min(max, projectedTarget));
       if (noMotion) {
         value.set(target_);
         return { target: target_, settled: Promise.resolve() };
       }
-      const spring2 = value.spring(target_, options.snapTransition);
-      return { target: target_, settled: spring2.finished };
+      const spring = value.spring(target_, options.snapTransition);
+      return { target: target_, settled: spring.finished };
     }
     if (momentum) {
       const item = value.decay({ ...typeof momentum === "object" ? momentum : {}, velocity, min, max });
@@ -1943,8 +883,8 @@ function drag(target, element, options = {}) {
     }
     if (event.phase === "began" || event.phase === "changed") {
       const next = {};
-      if (values.x) next.x = clampWithRubberband(start.x + event.offset.x, ...bounds.x, reduced() ? false : options.elastic ?? 0.55, Math.max(1, element.offsetWidth || 300));
-      if (values.y) next.y = clampWithRubberband(start.y + event.offset.y, ...bounds.y, reduced() ? false : options.elastic ?? 0.55, Math.max(1, element.offsetHeight || 300));
+      if (values.x) next.x = (0, import_motion.clampWithRubberband)(start.x + event.offset.x, ...bounds.x, reduced() ? false : options.elastic ?? 0.55, Math.max(1, element.offsetWidth || 300));
+      if (values.y) next.y = (0, import_motion.clampWithRubberband)(start.y + event.offset.y, ...bounds.y, reduced() ? false : options.elastic ?? 0.55, Math.max(1, element.offsetHeight || 300));
       if (next.x != null) crossCues(last.x, next.x);
       if (next.y != null) crossCues(last.y, next.y);
       last = { x: next.x ?? last.x, y: next.y ?? last.y };
@@ -1967,14 +907,13 @@ function drag(target, element, options = {}) {
     }
   });
   if (options.cursor) element.style.cursor = "grab";
-  const oneDimensional = target instanceof MotionValue ? target : axis === "y" ? target.y : target.x;
+  const oneDimensional = scalarTarget ?? (axis === "y" ? axesTarget.y : axesTarget.x);
   const keyboardDispose = options.keyboard === false || !oneDimensional ? () => {
   } : installDragKeyboard(element, oneDimensional, { axis: axis === "y" ? "y" : "x", min: numericBounds(options.bounds, element, axis === "y" ? "y" : "x")[0], max: numericBounds(options.bounds, element, axis === "y" ? "y" : "x")[1], step: options.step, label: options.ariaLabel, onCancel: () => {
     oneDimensional.spring(axis === "y" ? origin.y : origin.x, options.snapTransition);
   } });
   return { isDragging, start(nativeEvent) {
-    const clone = new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: nativeEvent.pointerId, pointerType: nativeEvent.pointerType, clientX: nativeEvent.clientX, clientY: nativeEvent.clientY, button: nativeEvent.button, buttons: nativeEvent.buttons, pressure: nativeEvent.pressure, isPrimary: nativeEvent.isPrimary });
-    element.dispatchEvent(clone);
+    arena.session.start(nativeEvent);
   }, cancel() {
     arena.cancel();
     values.x?.spring(origin.x, options.snapTransition);
@@ -1988,10 +927,10 @@ function drag(target, element, options = {}) {
   } };
 }
 function transformGesture(element, options) {
-  const scale = options.scale ?? new MotionValue(1);
-  const rotation = options.rotation ?? new MotionValue(0);
-  const x = options.x ?? new MotionValue(0);
-  const y = options.y ?? new MotionValue(0);
+  const scale = options.scale ?? new import_motion.MotionValue(1);
+  const rotation = options.rotation ?? new import_motion.MotionValue(0);
+  const x = options.x ?? new import_motion.MotionValue(0);
+  const y = options.y ?? new import_motion.MotionValue(0);
   let initial;
   const session = createPointerSession({ element, touchAction: "none", onSample: (_sample, pointers) => {
     const pair = [...pointers.values()].map((history) => history.at(-1)).filter(Boolean);
@@ -2009,7 +948,7 @@ function transformGesture(element, options) {
       return;
     }
     const ratio = span2 / Math.max(1, initial.span);
-    const nextScale = clampWithRubberband(initial.scale * ratio, ...options.scaleBounds ?? [1, 4], options.elastic ?? 0.35, 2);
+    const nextScale = (0, import_motion.clampWithRubberband)(initial.scale * ratio, ...options.scaleBounds ?? [1, 4], options.elastic ?? 0.35, 2);
     scale.set(nextScale);
     rotation.set(initial.rotation + angle2 - initial.angle);
     x.set(initial.x + center2.x - initial.center.x + (1 - ratio) * (initial.center.x - element.getBoundingClientRect().left));
@@ -2048,8 +987,8 @@ function scrub(transport, element, options = {}) {
   let start = transport.time;
   let wasPlaying = false;
   const axis = options.axis ?? "x";
-  const playhead = new MotionValue(transport.time);
-  const dragValue = new MotionValue(0);
+  const playhead = new import_motion.MotionValue(transport.time);
+  const dragValue = new import_motion.MotionValue(0);
   const control = drag(dragValue, element, { axis, momentum: false, touchAction: axis === "x" ? "pan-y" : "pan-x", onStart: () => {
     start = transport.time;
     dragValue.set(0);
@@ -2057,17 +996,17 @@ function scrub(transport, element, options = {}) {
     transport.pause();
   }, onMove: (event) => {
     const delta = event.offset[axis];
-    const ms = options.pixelsPerMs ? delta / options.pixelsPerMs : frameToMs(delta / (options.pixelsPerFrame ?? 10), transport.frameRate);
+    const ms = options.pixelsPerMs ? delta / options.pixelsPerMs : (0, import_motion.frameToMs)(delta / (options.pixelsPerFrame ?? 10), transport.frameRate);
     playhead.set(start + ms);
     transport.seek(playhead.get(), { cues: options.cues });
   }, onEnd: (event) => {
-    const velocityMs = options.pixelsPerMs ? event.velocity[axis] / options.pixelsPerMs : frameToMs(event.velocity[axis] / (options.pixelsPerFrame ?? 10), transport.frameRate);
+    const velocityMs = options.pixelsPerMs ? event.velocity[axis] / options.pixelsPerMs : (0, import_motion.frameToMs)(event.velocity[axis] / (options.pixelsPerFrame ?? 10), transport.frameRate);
     const momentum = reduced() ? false : options.momentum ?? true;
     const finish = () => {
       let target = playhead.get();
-      if (options.snapToFrames) target = frameToMs(Math.round(target / frameToMs(1, transport.frameRate)), transport.frameRate);
+      if (options.snapToFrames) target = (0, import_motion.frameToMs)(Math.round(target / (0, import_motion.frameToMs)(1, transport.frameRate)), transport.frameRate);
       if (options.snapToMarkers) {
-        const within = typeof options.snapToMarkers === "object" ? parseTime(options.snapToMarkers.within, transport.frameRate) : Infinity;
+        const within = typeof options.snapToMarkers === "object" ? (0, import_motion.parseTime)(options.snapToMarkers.within, transport.frameRate) : Infinity;
         const marker = transport.root.markers.reduce((best, item) => !best || Math.abs(item.time - target) < Math.abs(best.time - target) ? item : best, void 0);
         if (marker && Math.abs(marker.time - target) <= within) target = marker.time;
       }
@@ -2075,7 +1014,7 @@ function scrub(transport, element, options = {}) {
       if (wasPlaying && options.resumeAfter) transport.play();
     };
     if (momentum) {
-      const inertia = new InertiaItem({ ...typeof momentum === "object" ? momentum : {}, from: playhead.get(), velocity: velocityMs, min: 0, max: transport.duration, onUpdate: (value) => {
+      const inertia = new import_motion.InertiaItem({ ...typeof momentum === "object" ? momentum : {}, from: playhead.get(), velocity: velocityMs, min: 0, max: transport.duration, onUpdate: (value) => {
         playhead.set(value);
         transport.seek(value, { cues: options.cues });
       }, autoplay: true });
@@ -2086,7 +1025,7 @@ function scrub(transport, element, options = {}) {
 }
 function press(element, options = {}) {
   const recognizer = pressRecognizer();
-  const isPressed = new MotionValue(false);
+  const isPressed = new import_motion.MotionValue(false);
   const unsubscribe = recognizer.subscribe((event) => {
     const value = event.phase === "began" || event.phase === "changed";
     isPressed.set(value);
@@ -2100,7 +1039,7 @@ function press(element, options = {}) {
 }
 function hover(element, options = {}) {
   const recognizer = hoverRecognizer();
-  const isHovered = new MotionValue(false);
+  const isHovered = new import_motion.MotionValue(false);
   const unsubscribe = recognizer.subscribe((event) => {
     const value = event.phase === "began" || event.phase === "changed";
     isHovered.set(value);
@@ -2114,6 +1053,7 @@ function hover(element, options = {}) {
 }
 
 // src/gesture/record.ts
+var import_motion2 = require("@dhaakon/motion");
 function record(element, options = {}) {
   const samples = [];
   const rect = element.getBoundingClientRect();
@@ -2186,15 +1126,15 @@ function rdp(points, tolerance) {
 }
 function gestureToTrack(recording, options) {
   const pointerId = options.pointerId ?? recording.samples[0]?.id;
-  const rate = frameRate(options.frameRate);
+  const rate = (0, import_motion2.frameRate)(options.frameRate);
   const axis = options.axis ?? "x";
   const raw = recording.samples.filter((sample) => sample.id === pointerId && sample.kind !== "cancel").map(({ x, y, t }) => ({ x, y, t }));
   const simplified = rdp(raw, options.simplify ?? 0);
   const byFrame = /* @__PURE__ */ new Map();
-  for (const point of simplified) byFrame.set(msToFrame(point.t, rate), point);
-  const keyframes = [...byFrame.entries()].sort(([a], [b]) => a - b).map(([frame, point]) => ({ at: frameToMs(frame, rate), value: axis === "both" ? { x: point.x, y: point.y } : axis === "x" ? point.x : point.y }));
+  for (const point of simplified) byFrame.set((0, import_motion2.msToFrame)(point.t, rate), point);
+  const keyframes = [...byFrame.entries()].sort(([a], [b]) => a - b).map(([frame, point]) => ({ at: (0, import_motion2.frameToMs)(frame, rate), value: axis === "both" ? { x: point.x, y: point.y } : axis === "x" ? point.x : point.y }));
   if (!keyframes.length) keyframes.push({ at: 0, value: axis === "both" ? { x: 0, y: 0 } : 0 });
-  return new Track({ frameRate: rate, keyframes, apply: () => {
+  return new import_motion2.Track({ frameRate: rate, keyframes, apply: () => {
   } });
 }
 // Annotate the CommonJS export names for ESM import in node:

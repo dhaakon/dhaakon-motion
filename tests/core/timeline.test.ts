@@ -63,6 +63,28 @@ test('a nested timeline samples equivalently to sampling it directly at (t - sta
   }
 });
 
+test('a yoyo timeline reverses its children continuously on the alternate lap', () => {
+  const child = new Tween({ from: 0, to: 100, duration: 100, easing: 'linear' });
+  let completions = 0;
+  const timeline = new Timeline({ repeat: 1, repeatDelay: 20, yoyo: true, onComplete: () => { completions += 1; } }).add(child, 0);
+
+  const samples = [0, 25, 99, 100, 110, 119, 120, 121, 145, 219, 220].map((time) => {
+    timeline.sampleAt(time);
+    return child.value;
+  });
+
+  expect(samples).toEqual([0, 25, 99, 100, 100, 100, 100, 99, 75, 1, 0]);
+  expect(completions).toBe(1);
+});
+
+test('a timeline with an infinite child keeps finite sample times', () => {
+  const child = new Tween({ from: 0, to: 100, duration: 100, repeat: Infinity, easing: 'linear' });
+  const timeline = new Timeline({ yoyo: true }).add(child, 0);
+
+  expect(timeline.sampleAt(75)).toBe(75);
+  expect(child.value).toBe(75);
+});
+
 test('three levels of nesting sample equivalently to sampling the leaf directly', () => {
   const leafStandalone = new Tween({ from: 0, to: 1, duration: 100, easing: 'linear' });
   const leafNested = new Tween({ from: 0, to: 1, duration: 100, easing: 'linear' });
@@ -125,4 +147,11 @@ test('timeline samples overlapping children from one clock', () => {
   driver.step(100);
   expect(a.value).toBe(10);
   expect(b.value).toBe(30);
+});
+
+test('seek on an infinite timeline addresses one content cycle', () => {
+  const value = new Tween({ from: 0, to: 100, duration: 100, easing: 'linear' });
+  const timeline = new Timeline({ repeat: Infinity }).add(value, 0);
+  timeline.seek(.75);
+  expect(timeline.rootTransport?.time).toBe(75); expect(value.value).toBe(75);
 });

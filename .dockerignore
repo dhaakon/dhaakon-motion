@@ -1,5 +1,8 @@
 node_modules
 docs/dist
+exports
+test-results
+coverage
 .git
 *.tgz
 npm-debug.log
