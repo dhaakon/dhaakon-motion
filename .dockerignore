@@ -3,6 +3,8 @@ docs/dist
 exports
 test-results
 coverage
+target
+.tools
 .git
 *.tgz
 npm-debug.log

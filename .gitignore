@@ -5,3 +5,5 @@ docs/dist/
 .DS_Store
 exports/
 test-results/
+target/
+.tools/

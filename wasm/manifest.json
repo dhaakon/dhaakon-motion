@@ -1,0 +1,67 @@
+{
+  "format": "dhaakon-motion/numeric-wasm-artifacts/1",
+  "abiVersion": 1,
+  "irVersion": 1,
+  "binaryVersion": 1,
+  "rustToolchain": "1.94.1",
+  "wasmBindgen": "0.2.114",
+  "target": "wasm32-unknown-unknown",
+  "rustc": "rustc 1.94.1 (e408947bf 2026-03-25)\nbinary: rustc\ncommit-hash: e408947bfd200af42db322daf0fadfe7e26d3bd1\ncommit-date: 2026-03-25\nhost: x86_64-unknown-linux-gnu\nrelease: 1.94.1\nLLVM version: 21.1.8",
+  "sourceSha256": "8589eb60fdec6e2dd5ff9c12901f2dee218daafb6c3c41e41eb9890124da849b",
+  "sources": [
+    ".cargo/config.toml",
+    "Cargo.lock",
+    "Cargo.toml",
+    "crates/motion-core/Cargo.toml",
+    "crates/motion-core/examples/sample.rs",
+    "crates/motion-core/src/lib.rs",
+    "crates/motion-core/tests/numeric.rs",
+    "crates/motion-ir/Cargo.toml",
+    "crates/motion-ir/src/binary.rs",
+    "crates/motion-ir/src/lib.rs",
+    "crates/motion-wasm/Cargo.toml",
+    "crates/motion-wasm/src/lib.rs",
+    "rust-toolchain.toml",
+    "scripts/build-wasm.mjs",
+    "scripts/setup-rust.mjs"
+  ],
+  "artifacts": {
+    "wasm/node/motion_wasm.d.ts": {
+      "bytes": 803,
+      "sha256": "290ce73984a5fd6070799cba91ab3e2f2031a09df5ba8d5b2a047008efa1fd40"
+    },
+    "wasm/node/motion_wasm.js": {
+      "bytes": 5873,
+      "sha256": "8ca7ec3bfd149dfe2a64c64ce09d62dda4ad669a2d6080d7d3a3d47518712bed"
+    },
+    "wasm/node/motion_wasm_bg.wasm": {
+      "bytes": 183156,
+      "sha256": "2dc9d96225cada81fbffa212cbc6bd8a3be48ea03da22366140c5627b332db46"
+    },
+    "wasm/node/motion_wasm_bg.wasm.d.ts": {
+      "bytes": 872,
+      "sha256": "a1ed160459751fa59f5d5ac0d51d96db1e3c68e8daff98c5f47a0ce31d2e6221"
+    },
+    "wasm/node/package.json": {
+      "bytes": 35,
+      "sha256": "eb5f3182658b0282ad147e535c62d2b788d2baabc44448b74fe5dc1f66821fad"
+    },
+    "wasm/web/motion_wasm.d.ts": {
+      "bytes": 2618,
+      "sha256": "26620ae30b17016dd3c205c0cf7f36d33e88061f01def596494d2b830e2fc78f"
+    },
+    "wasm/web/motion_wasm.js": {
+      "bytes": 8855,
+      "sha256": "bc495f5568ac5404ccfe983c5fcf2e8fc9e3be93c65efd68698408f3b9fc266f"
+    },
+    "wasm/web/motion_wasm_bg.wasm": {
+      "bytes": 183156,
+      "sha256": "2dc9d96225cada81fbffa212cbc6bd8a3be48ea03da22366140c5627b332db46"
+    },
+    "wasm/web/motion_wasm_bg.wasm.d.ts": {
+      "bytes": 872,
+      "sha256": "a1ed160459751fa59f5d5ac0d51d96db1e3c68e8daff98c5f47a0ce31d2e6221"
+    }
+  },
+  "scope": "Numeric kernel only; not scene, renderer, TypeScript compiler or pixel provenance."
+}

@@ -1,0 +1,3 @@
+# No target-wide SIMD, threading or native-CPU assumptions in the reference kernel.
+[build]
+target-dir = "target"
