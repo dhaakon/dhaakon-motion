@@ -2,6 +2,8 @@
 
 Audit and implementation proposal · 2026-09-05 · no rewrite implemented
 
+Implementation began on 2026-09-06. This document retains the original audit baseline; see [current implementation status and accepted corrections](ENGINE-MIGRATION.md) for the branch, delivered first batch, checks and remaining phase gates.
+
 ## 1. Recommendation
 
 Build a shared Rust evaluation/geometry core that runs as WebAssembly in the browser and natively in the export tool. Keep the existing TypeScript classes, React composition, gesture integration and browser/device adapters as the public interface. Add a separately loaded `wgpu`/WGSL rendering backend for portable scenes, while retaining browser SVG/DOM/Three.js rendering for full compatibility.

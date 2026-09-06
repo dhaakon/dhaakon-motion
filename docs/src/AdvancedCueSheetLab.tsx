@@ -31,6 +31,16 @@ interface RenderAPI {
   source: string;
   seek: (frame: number) => void;
   png: (frame: number, width?: number) => Promise<string>;
+  profile?: {
+    frame: number;
+    width: number;
+    evaluateAndWriteMs: number;
+    serializeMs: number;
+    decodeMs: number;
+    drawMs: number;
+    pngMs: number;
+    totalMs: number;
+  };
 }
 declare global {
   interface Window {
@@ -270,16 +280,33 @@ export function AdvancedCueSheetShowcase() {
         async png(frame, width = 1920) {
           if (![960, 1920, 3840].includes(width))
             throw new Error('Render width must be 960, 1920, or 3840.');
+          const start = performance.now();
           api.seek(frame);
+          const sampled = performance.now();
           const svg = svgRef.current!;
           const serialized = new XMLSerializer().serializeToString(svg);
+          const serializedAt = performance.now();
           const image = new Image();
           image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`;
           await image.decode();
+          const decoded = performance.now();
           canvas.width = width;
           canvas.height = (width * 9) / 16;
           canvas.getContext('2d')!.drawImage(image, 0, 0, canvas.width, canvas.height);
-          return canvas.toDataURL('image/png').split(',')[1];
+          const drawn = performance.now();
+          const png = canvas.toDataURL('image/png').split(',')[1];
+          const finished = performance.now();
+          api.profile = {
+            frame,
+            width,
+            evaluateAndWriteMs: sampled - start,
+            serializeMs: serializedAt - sampled,
+            decodeMs: decoded - serializedAt,
+            drawMs: drawn - decoded,
+            pngMs: finished - drawn,
+            totalMs: finished - start,
+          };
+          return png;
         },
       };
       window.__dhaakonCueRender = api;

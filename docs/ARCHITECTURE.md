@@ -39,9 +39,16 @@ Nested timelines must not independently own transports or form cycles.
 | Renderer/device adapters | `src/three.ts`, `audio.ts`, `midi.ts`, `outputs.ts` | `three.test.ts`, `audio.test.ts`, `midi.test.ts`, `transport.test.ts` |
 | Diagnostics | `src/testing.ts`, `devtools.ts`, `trace.ts` | `testing-helpers.test.ts`, `tests/react/devtools.test.tsx` |
 | Public packaging | `package.json`, `tsup.config.ts` | `tests/dist/*.test.mjs` |
+| Experimental compiled groups | `src/compiled.ts`, `src/backends/` | `compiled.test.ts`, `compiled-review.test.ts`, `tests/react/compiled.test.tsx` |
+| Rust/Wasm IR and kernels | `crates/motion-ir`, `motion-core`, `motion-wasm` | `npm run test:rust`, `npm run test:wasm` |
+| Packed compiled consumers | `scripts/test-packed-engine.mjs` | `npm run test:packed-engine` |
 | Docs route registry | `docs/src/routes.ts`, `router.ts` | `docs-routes.test.ts`, `docs/scripts/smoke.mjs` |
 
 Test basenames without a directory above are under `tests/core/`.
+
+The compiled entry is opt-in and does not replace compatibility rendering or the
+existing clock. Read [engine migration status](ENGINE-MIGRATION.md) and
+[ADR 0001](adr/0001-compiled-execution.md) for current semantics and promotion gates.
 
 ## Docs structure
 

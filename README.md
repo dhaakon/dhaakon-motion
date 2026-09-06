@@ -439,3 +439,11 @@ Everything above 0.3 keeps working unchanged, with two documented exceptions:
 
 - Playing a **nested** timeline directly now throws (`Timeline.add()` didn't exist before 0.4, so this can only affect code already updated to nest timelines) — control the composition through its root `Transport` instead.
 - `Transport.seek()` fires any cue it crosses by default (pass `{ cues: 'skip' }` to suppress); this is a new method, not a change to `Timeline.seek(progress)`, which keeps its 0–1 fraction signature exactly as before.
+
+## Experimental Rust / WebAssembly engine
+
+The `feat/rust-wasm-engine` branch adds an opt-in compiled Track evaluator while
+preserving the existing TypeScript/React APIs. See
+[implementation status, usage and migration notes](docs/ENGINE-MIGRATION.md)
+before using `@dhaakon/motion/compiled`. Wasm is not downloaded or selected by
+ordinary imports. The GPU renderer and native video exporter are later milestones.

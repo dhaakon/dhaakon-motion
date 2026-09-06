@@ -3,6 +3,9 @@
 This is a TypeScript animation library plus a separately deployed Vite docs app.
 Read `docs/ARCHITECTURE.md` for ownership and the feature map. Read
 `docs/AUDIT.md` for known limitations before treating an existing behavior as a contract.
+For engine migration work, also read `docs/ENGINE-MIGRATION.md` and
+`docs/adr/0001-compiled-execution.md`; these record current corrections and the
+experimental compiled contract, distinct from the historical audit baseline.
 `IMPLEMENTATION_PLAN.md` and `GESTURE_PLAN.md` are historical plans, not current instructions.
 
 ## Start here
@@ -66,12 +69,26 @@ then run decoded-frame image comparisons; JSON hashes alone do not prove parity.
   while hidden, or when suspended. Do not wrap editors whose unsaved state must survive scrolling.
 - All times inside the engine are milliseconds. Public inputs may be frames or SMPTE.
 - Set `frameRate` explicitly on timelines before authoring frame-based positions.
-  Late binding currently remeasures children but not every previously resolved placement.
+  Authored placements now re-resolve in declaration order on late binding.
 - Loops are half-open `[in, out)`. Offline frame ranges are inclusive `[from, to]`.
   A 240-frame video exports frames 0–239, not 0–240.
 - Offline sampling should use a fresh, nonplaying timeline/transport and capture after output writes.
-- Cue-sheet validation is structural, not a security/resource-limit boundary.
-- `saveSheet` is currently lossy for some metadata; retain authored JSON as the show source.
+- Cue-sheet validation has data/resource limits, but is not a sandbox for host code.
+- `saveSheet(loaded)` preserves authored input; runtime edits require explicit
+  `{ source: 'runtime' }`, whose opaque extensions/functions remain best-effort.
+
+## Experimental compiled engine
+
+- `src/backends/` owns compiler, shape materialization, JS reference, binary encoder and Wasm host.
+- `crates/motion-ir`, `motion-core`, `motion-wasm` own validation, pure evaluation and ABI handles.
+- Original eight entries stay compatible; `/compiled` is optional, `/wasm/*` contains generated assets.
+- Do not hand-edit `wasm/` or `dist/`. Use `npm run build:wasm` and `npm run build` respectively.
+- Do not silently compile mutable live graphs, defer their callbacks, auto-load Wasm at import,
+  or enable a default backend based on microbenchmarks alone.
+- Compiled players/runtimes are explicitly owned terminal resources; Transport teardown is reusable.
+- Keep binary/IR/ABI versions, TS/Rust validators, source mappings and conformance tests aligned.
+- Run `npm run test:wasm` and `npm run test:packed-engine` after backend/packaging changes.
+- GPU/scene/export work is a separate milestone; state hashes are not pixel or audio parity.
 
 ## Add a feature page
 
