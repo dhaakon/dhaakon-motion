@@ -4,6 +4,10 @@ The original `dhaak-anim` tween vocabulary, rebuilt as the motion layer for the 
 
 Documentation and live playground: **http://dhaakon-ubuntu:21764**
 
+Coding agents can use the repository's [`$dhaakon-ui-motion` skill](skills/dhaakon-ui-motion/SKILL.md)
+to select UI components, motion execution paths, and appropriate verification across
+`@dhaakon/ui` and `@dhaakon/motion`.
+
 ## Install
 
 Configure the network registry once:

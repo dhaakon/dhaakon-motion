@@ -84,6 +84,8 @@ For CSS-native UI work, read `docs/CSS-UI-MOTION.md`. `/css` is browser-owned
 presentation, not a replacement for the Transport or compiled engine. The React
 adapter must import `@dhaakon/motion/css` canonically to share element ownership.
 Preserve the existing `motion` API and shared reduced-motion policy.
+For consumer work spanning both kits, the reusable source skill is
+`skills/dhaakon-ui-motion/SKILL.md`; keep its references aligned with public APIs.
 
 ## Experimental compiled engine
 

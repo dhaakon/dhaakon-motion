@@ -15,6 +15,9 @@ export default function OverviewPage() {
             live or offline.
           </p>
           <code>npm i @dhaakon/motion</code>
+          <p className="route-note">
+            Coding agent? Start with the <a href="/agent-skill">Dhaakon UI + Motion skill ↗</a>
+          </p>
         </div>
         <a className="overview-feature" href="/css-ui">
           <span>NEW / CSS + DHAAKON UI</span>

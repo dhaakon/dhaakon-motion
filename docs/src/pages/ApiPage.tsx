@@ -65,7 +65,8 @@ export default function ApiPage() {
       <p className="route-note">
         Repository contributors and coding agents: start with <code>AGENTS.md</code>,{' '}
         <code>docs/ARCHITECTURE.md</code>, and <code>docs/AUDIT.md</code>. No fixed size claims or
-        competitor rankings are used here; measure the current build.
+        competitor rankings are used here; measure the current build. For consumer interface work,
+        use the <a href="/agent-skill">Dhaakon UI + Motion agent skill</a>.
       </p>
     </>
   );

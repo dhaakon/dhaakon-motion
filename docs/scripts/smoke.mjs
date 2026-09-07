@@ -122,6 +122,7 @@ try {
     await ready();
     await delay(200);
     assert.equal(await browser.evaluate('document.querySelectorAll(".page-heading h1").length'), 1);
+    if (path === '/agent-skill') await screenshot('agent-skill-motion');
     if (path === '/svg-cue-sheet') {
       await waitFor('document.querySelector("video")?.readyState >= 2', 'offline MP4 decode');
       const video = await browser.evaluate(

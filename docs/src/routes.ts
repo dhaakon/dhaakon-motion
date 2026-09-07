@@ -35,6 +35,17 @@ export const routes = [
     component: lazy(() => import('./pages/CssUiPage')),
   },
   {
+    path: '/agent-skill',
+    title: 'Give the agent the system.',
+    label: 'Agent integration skill',
+    group: 'Start',
+    description:
+      'A reusable Codex skill for choosing Dhaakon UI components, motion execution paths, and verification evidence.',
+    source: 'skills/dhaakon-ui-motion/SKILL.md',
+    test: 'docs/scripts/smoke.mjs',
+    component: lazy(() => import('./pages/AgentSkillPage')),
+  },
+  {
     path: '/tweens',
     title: 'Values in motion.',
     label: 'Tweens & easing',

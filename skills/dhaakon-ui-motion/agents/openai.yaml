@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dhaakon UI + Motion"
+  short_description: "Build accessible interfaces with authored motion"
+  default_prompt: "Use $dhaakon-ui-motion to build this React interface with the Dhaakon kits."
