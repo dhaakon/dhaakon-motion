@@ -1,8 +1,58 @@
 # @dhaakon/motion
 
-The original `dhaak-anim` tween vocabulary, rebuilt as the motion layer for the Dhaakon network. The core is dependency-free and framework-agnostic; React, Three.js, Web Audio, and Web MIDI support are separate, optional entry points.
+**A frame-accurate animation engine for the web** — tweens, timelines and a transport clock with SMPTE timecode, cues, deterministic offline rendering, gestures and physics. The core is dependency-free and framework-agnostic; React, Three.js, Web Audio, Web MIDI, CSS and gesture support are separate, optional entry points.
 
-Documentation and live playground: **http://dhaakon-ubuntu:21764**
+It began as the original `dhaak-anim` tween vocabulary and is now the motion layer for [dhaakon.com](https://dhaakon.com/) and [`@dhaakon/ui`](https://github.com/dhaakon/dhaakon-ui).
+
+[Documentation and live playground](https://motion.dhaakon.com) · [API reference](https://motion.dhaakon.com/api) · [Architecture](docs/ARCHITECTURE.md) · [Changelog](CHANGELOG.md) · [UI kit](https://ui.dhaakon.com)
+
+![version](https://img.shields.io/badge/version-0.8.0-ff5a1f) ![core deps](https://img.shields.io/badge/core%20dependencies-0-111) ![react](https://img.shields.io/badge/react-18%20%7C%2019%20(optional)-111) ![license](https://img.shields.io/badge/license-MIT-111)
+
+---
+
+## Contents
+
+- [Highlights](#highlights)
+- [Explore the docs](#explore-the-docs)
+- [Install](#install)
+- [CSS-first interfaces](#css-first-interfaces-v080)
+- [Core](#core) · [Timelines](#timelines) · [Transport](#transport) · [SMPTE timecode](#smpte-timecode-and-frame-rates)
+- [Nested timelines, markers, and cues](#nested-timelines-markers-and-cues)
+- [Deterministic offline rendering](#deterministic-offline-rendering)
+- [Outputs: DOM, Three.js, Canvas, audio, MIDI](#outputs-dom-threejs-canvas-audio-midi)
+- [Cue sheets and scene states](#cue-sheets-and-scene-states)
+- [Testing compositions](#testing-compositions) · [Inspecting a timeline](#inspecting-a-timeline)
+- [Touch, gestures, and physics](#touch-gestures-and-physics)
+- [React](#react) · [Custom renderers and Three.js](#custom-renderers-and-threejs)
+- [Entry points](#entry-points)
+- [Development](#development) · [Project structure](#project-structure)
+- [Compatibility notes](#compatibility-notes-04) · [Experimental Rust / WebAssembly engine](#experimental-rust--webassembly-engine)
+- [License](#license)
+
+## Highlights
+
+- **One clock for everything.** A `Transport` drives timelines and any number of outputs — DOM, Canvas, Three.js, Web Audio, MIDI, lighting — and draws each once per tick.
+- **Broadcast-grade time.** Frame rates from 23.976 to 60 including drop-frame, timecode literals (`'00:00:01:00'`, `'12f'`) anywhere a time is accepted.
+- **Deterministic.** Seek, scrub, reverse and repeat without drift; render frame-exact offline output; test compositions with a manual frame driver.
+- **Cues and regions** that fire correctly in both directions, on scrubs, seeks and loop turnovers.
+- **Gestures and physics** — drag, pinch, scrub, momentum, springs and recordable performances that become animation tracks.
+- **React without rerenders** — `motion.*` elements, `Reveal`, hooks and a declarative `<Transport>`/`<Sequence>` composition API.
+- **Zero runtime dependencies** in the core; every integration is opt-in.
+
+## Explore the docs
+
+The [docs overview](https://motion.dhaakon.com) runs no demos; each feature has its own lazy-loaded route:
+
+| Route | Topic |
+| --- | --- |
+| [/tweens](https://motion.dhaakon.com/tweens) · [/timelines](https://motion.dhaakon.com/timelines) · [/transport](https://motion.dhaakon.com/transport) | Core building blocks |
+| [/react](https://motion.dhaakon.com/react) · [/css-ui](https://motion.dhaakon.com/css-ui) | React API and CSS-first UI motion with Dhaakon UI |
+| [/gestures](https://motion.dhaakon.com/gestures) · [/gesture-labs](https://motion.dhaakon.com/gesture-labs) | Interaction demos and production labs |
+| [/cue-sheets](https://motion.dhaakon.com/cue-sheets) · [/svg-cue-sheet](https://motion.dhaakon.com/svg-cue-sheet) | JSON cue sheets and the 24fps SVG director's cut vs. offline MP4 |
+| [/outputs](https://motion.dhaakon.com/outputs) · [/three](https://motion.dhaakon.com/three) · [/visuals](https://motion.dhaakon.com/visuals) | Renderers, Three.js and visual studies |
+| [/offline-rendering](https://motion.dhaakon.com/offline-rendering) · [/inspector](https://motion.dhaakon.com/inspector) | Frame-exact export and the devtools overlay |
+| [/production](https://motion.dhaakon.com/production) · [/rust/experimental](https://motion.dhaakon.com/rust/experimental) | Integrated productions and the opt-in Rust/Wasm engine |
+| [/api](https://motion.dhaakon.com/api) · [/agent-skill](https://motion.dhaakon.com/agent-skill) | API reference and the coding-agent skill |
 
 Coding agents can use the repository's [`$dhaakon-ui-motion` skill](skills/dhaakon-ui-motion/SKILL.md)
 to select UI components, motion execution paths, and appropriate verification across
@@ -10,20 +60,21 @@ to select UI components, motion execution paths, and appropriate verification ac
 
 ## Install
 
-Configure the network registry once:
-
-```ini
-@dhaakon:registry=http://dhaakon-ubuntu:21760/
-```
+The package is not on the public npm registry yet. Build and install it from source:
 
 ```sh
-npm install @dhaakon/motion
+# from a clone of this repository
+npm ci
+npm run build
+npm pack                      # → dhaakon-motion-0.8.0.tgz
+
+# in your app
+npm install ../path/to/dhaakon-motion-0.8.0.tgz
 ```
 
-The opt-in Rust/Wasm prerelease uses `npm install @dhaakon/motion@experimental`.
-Explore its [advanced experimental demos](http://dhaakon-ubuntu:21764/rust/experimental)
-and [scope, lifecycle and verification notes](docs/RUST-EXPERIMENTAL.md).
-It does not change the stable `latest` tag or automatically accelerate existing imports.
+Inside the dhaakon-network the package is also served by a private registry (`@dhaakon:registry`), where the opt-in Rust/Wasm prerelease is tagged `experimental` (`npm install @dhaakon/motion@experimental`). See the [experimental demos](https://motion.dhaakon.com/rust/experimental) and [scope, lifecycle and verification notes](docs/RUST-EXPERIMENTAL.md); it never changes the stable `latest` tag or accelerates existing imports automatically.
+
+**Optional peers:** `react`/`react-dom` 18 or 19 for `/react`, and `three` for `/three` (type-only). Web Audio and Web MIDI need no npm dependency.
 
 ## CSS-first interfaces (v0.8.0)
 
@@ -426,13 +477,14 @@ npm run docs:verify-cue # decoded-frame image comparisons + live controls
 npm run check:all       # complete local verification (Chrome required)
 ```
 
-The documentation site imports the package source directly and uses `@dhaakon/ui`. Its network container is `dhaakon-motion-docs` in the `dhaakon-network` Compose stack.
+The documentation site imports the package source directly and uses `@dhaakon/ui`.
 
-The [docs overview](http://dhaakon-ubuntu:21764/) runs no demos. Features have
-independent lazy-loaded routes, including [gestures](http://dhaakon-ubuntu:21764/gestures),
-[transport](http://dhaakon-ubuntu:21764/transport), [Three.js](http://dhaakon-ubuntu:21764/three),
-and the [24fps SVG / offline MP4 comparison](http://dhaakon-ubuntu:21764/svg-cue-sheet).
-The complete registry is `docs/src/routes.ts`; legacy section bookmarks redirect.
+Requirements: **Node 24**; Chrome for the smoke/verification scripts; Rust (`npm run rust:setup`) only for the experimental Wasm engine; GStreamer only for `docs:render-cue`.
+
+The docs routes are registered in `docs/src/routes.ts`; legacy section bookmarks redirect.
+The site uses path-based routing, so a static host must serve `index.html` for unknown
+paths (SPA fallback). `Dockerfile.docs` builds it and serves it with nginx; `docs/dist/`
+can be uploaded to any static host with that fallback configured.
 
 The SVG director’s cut is a 24-second, five-act composition with 23 inspectable
 targets, solo/mute controls, and a side-by-side 1080p offline master. The
@@ -451,6 +503,18 @@ geometry, reproducible export, and decoded-frame verification limits.
 | `@dhaakon/motion/testing` | `ManualDriver`, `createTestScheduler`, `installFrameDriver`, `expectSample`, `snapshotTimeline`, `sample`, `stepFrames`, `runUntil`, audio/MIDI fakes |
 | `@dhaakon/motion/devtools` | `mountInspector` — a plain-DOM transport bar + timeline lanes overlay |
 
+## Project structure
+
+```
+src/            the engine — core, timeline, transport, outputs, react, css, gesture, testing, devtools
+crates/         Rust workspace for the experimental compiled engine (motion-core, motion-ir, motion-wasm)
+wasm/           generated Wasm artifacts used by the /compiled entry
+docs/           the documentation site (Vite + React + @dhaakon/ui) and design notes
+skills/         the version-controlled $dhaakon-ui-motion coding-agent skill
+tests/          vitest suites and packaged-output (dist) compatibility tests
+scripts/        Wasm build, benchmarks and profiling
+```
+
 ## Compatibility notes (0.4)
 
 Everything above 0.3 keeps working unchanged, with two documented exceptions:
@@ -465,3 +529,7 @@ preserving the existing TypeScript/React APIs. See
 [implementation status, usage and migration notes](docs/ENGINE-MIGRATION.md)
 before using `@dhaakon/motion/compiled`. Wasm is not downloaded or selected by
 ordinary imports. The GPU renderer and native video exporter are later milestones.
+
+## License
+
+[MIT](LICENSE). Three.js, React and other optional peers retain their own licenses.
