@@ -363,6 +363,9 @@
 .agent-skill-cards {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+.agent-skill-cards.agent-skill-tools {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .shader-study {
   position: relative;
   min-height: 320px;
@@ -462,7 +465,8 @@
   .architecture-strip b {
     font-size: 10px;
   }
-  .api-entry-list {
+  .api-entry-list,
+  .agent-skill-cards.agent-skill-tools {
     grid-template-columns: 1fr;
   }
   .docs-content .demo-grid {

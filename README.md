@@ -14,6 +14,7 @@ It began as the original `dhaak-anim` tween vocabulary and is now the motion lay
 
 - [Highlights](#highlights)
 - [Explore the docs](#explore-the-docs)
+- [Agent skill: Claude Code and Codex](#agent-skill-claude-code-and-codex)
 - [Install](#install)
 - [CSS-first interfaces](#css-first-interfaces-v080)
 - [Core](#core) · [Timelines](#timelines) · [Transport](#transport) · [SMPTE timecode](#smpte-timecode-and-frame-rates)
@@ -54,9 +55,26 @@ The [docs overview](https://motion.dhaakon.com) runs no demos; each feature has 
 | [/production](https://motion.dhaakon.com/production) · [/rust/experimental](https://motion.dhaakon.com/rust/experimental) | Integrated productions and the opt-in Rust/Wasm engine |
 | [/api](https://motion.dhaakon.com/api) · [/agent-skill](https://motion.dhaakon.com/agent-skill) | API reference and the coding-agent skill |
 
-Coding agents can use the repository's [`$dhaakon-ui-motion` skill](skills/dhaakon-ui-motion/SKILL.md)
-to select UI components, motion execution paths, and appropriate verification across
-`@dhaakon/ui` and `@dhaakon/motion`.
+## Agent skill: Claude Code and Codex
+
+[`skills/dhaakon-ui-motion/`](skills/dhaakon-ui-motion/SKILL.md) is a version-controlled skill that teaches a coding agent how `@dhaakon/ui` and `@dhaakon/motion` fit together: which layer to choose, who owns each animated property, the accessibility contracts, and how to verify the result. One canonical folder serves both tools — install it with a symlink so documentation and agent behavior cannot drift.
+
+| | Claude Code | Codex |
+| --- | --- | --- |
+| Personal install | `~/.claude/skills/dhaakon-ui-motion` | `$CODEX_HOME/skills/dhaakon-ui-motion` (default `~/.codex`) |
+| Per-project install | `.claude/skills/dhaakon-ui-motion` in the consumer repo | — |
+| Invoke | `/dhaakon-ui-motion …`, or automatically when the task matches | `Use $dhaakon-ui-motion to …` |
+| Repository rules | `CLAUDE.md` (imports `AGENTS.md`) | `AGENTS.md` |
+| Display metadata | `SKILL.md` frontmatter | `agents/openai.yaml` |
+
+```sh
+# from a dhaakon-motion checkout
+mkdir -p ~/.claude/skills "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s "$PWD/skills/dhaakon-ui-motion" ~/.claude/skills/dhaakon-ui-motion
+ln -s "$PWD/skills/dhaakon-ui-motion" "${CODEX_HOME:-$HOME/.codex}/skills/dhaakon-ui-motion"
+```
+
+Start a new agent session afterwards so skill discovery refreshes. Using the skill never grants permission to publish, deploy, push or upgrade packages. The full guide is on [ui.dhaakon.com](https://ui.dhaakon.com/#/agent-skill) and [motion.dhaakon.com](https://motion.dhaakon.com/agent-skill).
 
 ## Install
 

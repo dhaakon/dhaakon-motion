@@ -40,7 +40,7 @@ export const routes = [
     label: 'Agent integration skill',
     group: 'Start',
     description:
-      'A reusable Codex skill for choosing Dhaakon UI components, motion execution paths, and verification evidence.',
+      'A reusable Claude Code and Codex skill for choosing Dhaakon UI components, motion execution paths, and verification evidence.',
     source: 'skills/dhaakon-ui-motion/SKILL.md',
     test: 'docs/scripts/smoke.mjs',
     component: lazy(() => import('./pages/AgentSkillPage')),
