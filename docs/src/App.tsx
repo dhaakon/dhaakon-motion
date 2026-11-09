@@ -150,7 +150,7 @@ export function App({ version }: { version: string }) {
             <footer>
               <span>◇ DHAAKON MOTION</span>
               <span>MIT · TYPESCRIPT · REACT</span>
-              <a href="http://dhaakon-ubuntu:21724/dhaakon-ubuntu/dhaakon-motion">SOURCE ↗</a>
+              <a href="https://github.com/dhaakon/dhaakon-motion">SOURCE ↗</a>
             </footer>
           </main>
         </div>

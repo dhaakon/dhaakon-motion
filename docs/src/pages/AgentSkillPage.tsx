@@ -68,8 +68,8 @@ export default function AgentSkillPage() {
         The skill contains focused references for UI selection and accessibility, motion ownership
         and timing, accessible exit presence, gestures, production timelines, Canvas/Three, and
         offline verification. Read the reciprocal{' '}
-        <a href="http://dhaakon-ubuntu:21763/#/agent-skill">Dhaakon UI guide ↗</a> for the
-        component-side view.
+        <a href="https://ui.dhaakon.com/#/agent-skill">Dhaakon UI guide ↗</a> for the component-side
+        view.
       </p>
     </>
   );
