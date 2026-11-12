@@ -90,6 +90,10 @@ then build `Dockerfile.docs` and recreate only the Compose service
 Local compilation is not deployment. Report the successful live URL and registry
 version only after independent remote checks.
 
+> Since 0.8.0 the `/compiled` entry and its Wasm artifacts ship in the regular
+> `@dhaakon/motion` package on npm (`npm install @dhaakon/motion`); they remain
+> opt-in. The `experimental` tag below exists only on the private network registry.
+
 Install the opt-in release from the configured private registry:
 
 ```sh

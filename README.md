@@ -4,9 +4,9 @@
 
 It began as the original `dhaak-anim` tween vocabulary and is now the motion layer for [dhaakon.com](https://dhaakon.com/) and [`@dhaakon/ui`](https://github.com/dhaakon/dhaakon-ui).
 
-[Documentation and live playground](https://motion.dhaakon.com) · [API reference](https://motion.dhaakon.com/api) · [Architecture](docs/ARCHITECTURE.md) · [Changelog](CHANGELOG.md) · [UI kit](https://ui.dhaakon.com)
+[Documentation and live playground](https://motion.dhaakon.com) · [npm](https://www.npmjs.com/package/@dhaakon/motion) · [API reference](https://motion.dhaakon.com/api) · [Architecture](docs/ARCHITECTURE.md) · [Changelog](CHANGELOG.md) · [UI kit](https://ui.dhaakon.com)
 
-![version](https://img.shields.io/badge/version-0.8.0-ff5a1f) ![core deps](https://img.shields.io/badge/core%20dependencies-0-111) ![react](https://img.shields.io/badge/react-18%20%7C%2019%20(optional)-111) ![license](https://img.shields.io/badge/license-MIT-111)
+[![npm](https://img.shields.io/npm/v/@dhaakon/motion?color=ff5a1f)](https://www.npmjs.com/package/@dhaakon/motion) ![core deps](https://img.shields.io/badge/core%20dependencies-0-111) ![react](https://img.shields.io/badge/react-18%20%7C%2019%20(optional)-111) ![license](https://img.shields.io/badge/license-MIT-111)
 
 ---
 
@@ -78,21 +78,16 @@ Start a new agent session afterwards so skill discovery refreshes. Using the ski
 
 ## Install
 
-The package is not on the public npm registry yet. Build and install it from source:
-
 ```sh
-# from a clone of this repository
-npm ci
-npm run build
-npm pack                      # → dhaakon-motion-0.8.0.tgz
-
-# in your app
-npm install ../path/to/dhaakon-motion-0.8.0.tgz
+npm install @dhaakon/motion
+# or: pnpm add @dhaakon/motion · yarn add @dhaakon/motion
 ```
 
-Inside the dhaakon-network the package is also served by a private registry (`@dhaakon:registry`), where the opt-in Rust/Wasm prerelease is tagged `experimental` (`npm install @dhaakon/motion@experimental`). See the [experimental demos](https://motion.dhaakon.com/rust/experimental) and [scope, lifecycle and verification notes](docs/RUST-EXPERIMENTAL.md); it never changes the stable `latest` tag or accelerates existing imports automatically.
+The core has zero runtime dependencies. **Optional peers:** `react`/`react-dom` 18+ for `/react`, and `three` for `/three` (type-only). Web Audio and Web MIDI need no npm dependency. The package ships ESM and CommonJS builds with TypeScript types for every entry point.
 
-**Optional peers:** `react`/`react-dom` 18 or 19 for `/react`, and `three` for `/three` (type-only). Web Audio and Web MIDI need no npm dependency.
+The opt-in Rust/Wasm evaluator ships inside the package behind `@dhaakon/motion/compiled`; nothing downloads or selects Wasm unless you import it. See the [experimental demos](https://motion.dhaakon.com/rust/experimental) and [scope, lifecycle and verification notes](docs/RUST-EXPERIMENTAL.md).
+
+The docs site documents the current source, which can be ahead of the latest npm release — check [the published version](https://www.npmjs.com/package/@dhaakon/motion) before relying on a newly documented API.
 
 ## CSS-first interfaces (v0.8.0)
 
@@ -100,8 +95,8 @@ The new `/css-ui` docs page demonstrates browser-owned CSS motion with Dhaakon U
 shared timing tokens, named CSS variants, interrupted transitions, reduced motion
 and an accessible disclosure. Use `cssMotion` from `/react` and the optional `/css`
 entry; existing `motion`/Transport APIs and opt-in Rust/Wasm graphics remain separate.
-See [the API, ownership rules and scope](docs/CSS-UI-MOTION.md). The v0.8.0 Git/docs
-release is separate from npm publication; registry tags are not changed by deployment.
+See [the API, ownership rules and scope](docs/CSS-UI-MOTION.md). Docs deployments never
+change npm tags.
 
 ## Core
 

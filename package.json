@@ -4,6 +4,29 @@
   "description": "Optimized tween, timeline, transport, and React composition primitives for the Dhaakon network.",
   "type": "module",
   "license": "MIT",
+  "author": "dhaakon (https://dhaakon.com)",
+  "homepage": "https://motion.dhaakon.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dhaakon/dhaakon-motion.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dhaakon/dhaakon-motion/issues"
+  },
+  "keywords": [
+    "animation",
+    "tween",
+    "timeline",
+    "motion",
+    "timecode",
+    "smpte",
+    "gesture",
+    "react",
+    "threejs",
+    "web-audio",
+    "midi",
+    "dhaakon"
+  ],
   "sideEffects": false,
   "files": [
     "dist",
@@ -67,7 +90,8 @@
     }
   },
   "publishConfig": {
-    "registry": "http://dhaakon-ubuntu:21760/"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "build": "tsup",
@@ -94,7 +118,8 @@
     "check:all": "npm run check && npm run docs:check && npm run docs:smoke && node docs/scripts/verify-css-ui.mjs && node docs/scripts/verify-rust.mjs && node docs/scripts/verify-cue.mjs",
     "bench:gestures": "npm run build && node docs/scripts/gesture-bench.mjs",
     "format:docs": "prettier --write docs/src/App.tsx docs/src/routes.ts docs/src/router.ts docs/src/routes.css docs/src/pages docs/src/labs docs/src/examples docs/src/components docs/src/AdvancedCueSheetLab.tsx docs/src/advancedCueSheet.ts docs/src/cue-sheet docs/scripts docs/source-aliases.ts",
-    "format:check": "prettier --check docs/src/App.tsx docs/src/routes.ts docs/src/router.ts docs/src/routes.css docs/src/pages docs/src/labs docs/src/examples docs/src/components docs/src/AdvancedCueSheetLab.tsx docs/src/advancedCueSheet.ts docs/src/cue-sheet docs/scripts docs/source-aliases.ts"
+    "format:check": "prettier --check docs/src/App.tsx docs/src/routes.ts docs/src/router.ts docs/src/routes.css docs/src/pages docs/src/labs docs/src/examples docs/src/components docs/src/AdvancedCueSheetLab.tsx docs/src/advancedCueSheet.ts docs/src/cue-sheet docs/scripts docs/source-aliases.ts",
+    "prepublishOnly": "npm run check"
   },
   "peerDependencies": {
     "react": ">=18",
