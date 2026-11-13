@@ -169,8 +169,9 @@ await transport.finished;        // resolves once, at the end, when not looping
 import { frameRate, parseTime, formatTime, msToTimecode, timecodeToMs } from '@dhaakon/motion';
 
 const rate = frameRate('29.97df');       // drop-frame, only legal at 29.97/59.94
-parseTime('00:01:00;02', rate);          // 1800 frames worth of ms
-formatTime(60000, rate, 'timecode');     // '00:01:00;02'
+parseTime('00:01:00;02', rate);          // 60060 — frame 1800, in ms
+formatTime(60060, rate, 'timecode');     // '00:01:00;02'
+formatTime(60000, rate, 'timecode');     // '00:00:59;28' — a wall-clock minute is 1798 frames
 ```
 
 `FrameRates` has presets from `23.976` through `60`, including `29.97df`/`59.94df`. `msToFrame`/`frameToMs` are the plain rational conversion (frame ↔ ms, no drop-frame correction — a frame's actual moment in time never changes); the drop-frame correction lives in `timecodeToFrames`/`framesToTimecode`, which only affects how a frame count is *displayed*. `Tween.frameAt(rate)`/`.timecodeAt(rate)` and `Timeline.frames`/`.timecode()` read the same way.
