@@ -30,7 +30,7 @@ CSS / JavaScript / Rust boundary, lifecycle and current limits.
 | --- | --- | --- |
 | Tween and observable values | `src/core.ts` | `tests/core/tween.test.ts`, `motion-value.test.ts` |
 | Easing/interpolation | `src/easing.ts`, `interpolate.ts` | `interpolate.test.ts`, `track.test.ts` |
-| Repeat/direction folding | `src/cycle.ts`, `track.ts` | `cycle.test.ts`, `audit-regressions.test.ts` |
+| Repeat/direction folding | `src/cycle.ts`, `track.ts` | `cycle.test.ts`, `regressions.test.ts` |
 | Scheduling and playback | `src/scheduler.ts`, `transport.ts` | `scheduler.test.ts`, `transport.test.ts` |
 | Placement/cues/inspection | `src/timeline.ts`, `items.ts` | `timeline.test.ts`, `cues.test.ts`, `inspect.test.ts` |
 | Rational frames/SMPTE | `src/time.ts`, `timecode.ts` | `time.test.ts`, `timecode.test.ts` |
@@ -52,8 +52,8 @@ CSS / JavaScript / Rust boundary, lifecycle and current limits.
 Test basenames without a directory above are under `tests/core/`.
 
 The compiled entry is opt-in and does not replace compatibility rendering or the
-existing clock. Read [engine migration status](ENGINE-MIGRATION.md) and
-[ADR 0001](adr/0001-compiled-execution.md) for current semantics and promotion gates.
+existing clock. Read [the compiled engine guide](COMPILED-ENGINE.md) and
+[ADR 0001](adr/0001-compiled-execution.md) for its semantics.
 
 ## Docs structure
 
@@ -100,7 +100,7 @@ The nginx SPA fallback supports direct links. Unknown paths render a 404 view
    callback cleanup on client navigation, history, mobile navigation, 404, and MP4 decoding/ranges.
 
 Browser checks use local static output by default, not the development server.
-`DOCS_URL=http://dhaakon-ubuntu:21764 npm run docs:smoke` verifies a deployment.
+`DOCS_URL=https://motion.dhaakon.com npm run docs:smoke` verifies a deployment.
 GPU/software-renderer timing is not a performance benchmark. Physical touch,
 Safari/Firefox, live MIDI hardware, and audio perceptual quality need separate testing.
 
@@ -117,5 +117,4 @@ semantics. `docs:verify-cue` checks decoded frames against fresh SVG pixels;
 source hashes alone do not establish image equivalence.
 
 The Docker build consumes source aliases and docs directly; it does not depend
-on host `dist/`. Deployment changes only the motion docs container. See `AGENTS.md`
-for authorization boundaries and `AUDIT.md` for known correctness limitations.
+on host `dist/`.

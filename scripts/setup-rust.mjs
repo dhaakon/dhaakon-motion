@@ -26,7 +26,7 @@ function configureLocalCompiler() {
 configureLocalCompiler();
 
 function provisionLocalCompiler() {
-  // Optional Ubuntu x64 bootstrap for the audited host: extracted files only,
+  // Optional Ubuntu x64 bootstrap for a host with no C compiler: extracted files only,
   // never apt install, root privileges, package registration or system changes.
   const packages = [
     ['gcc-15-x86-64-linux-gnu', 'df0e5375c9e981b18e396c2e9ec1e359f226576a9b94a311bf07603f3ca6023a'],

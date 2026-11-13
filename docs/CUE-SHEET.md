@@ -24,8 +24,8 @@ keyframes to complete numeric JSON objects. It does not generate random runtime
 values. All geometry is derived from sampled controls, not elapsed wall time.
 The editor preserves the last good take and imposes adapter-specific limits:
 350 kB, eight nesting levels, 160 items, 200 keys per track, 1–1440 frames at 24 fps,
-finite control ranges, and one writer per supported target. These limits do not
-fix or supersede the general validation backlog in `AUDIT.md`.
+finite control ranges, and one writer per supported target. These limits belong to
+this editor; they are not general cue-sheet validation.
 
 ## Render and verify
 

@@ -10,7 +10,6 @@
   input retention, backend telemetry and desktop/mobile verification.
 - Keep existing JavaScript timelines and opt-in experimental Rust/Wasm evaluation
   separate. No automatic backend promotion or universal GPU-acceleration claim.
-- Git/docs release only; npm publication and registry tags are separate operations.
 
 ## 0.6.0
 
@@ -94,7 +93,7 @@ Transport, SMPTE timecode, nested cue timelines, deterministic offline rendering
 
 ### Scope notes
 
-- `mtcOutput` (MIDI Timecode quarter-frame output) is not implemented — the plan that shaped this release named it an explicit stretch goal.
+- `mtcOutput` (MIDI Timecode quarter-frame output) is not implemented.
 - Audio clip positions inside a *repeating* nested timeline are not lap-aware (`audioOutput`/`renderAudio` place them as if that timeline never repeats); put clips on the root or a non-repeating container.
 - No `<AudioClip>` React component — `useTransport()` to add one imperatively, keeping the `react` entry free of a Web Audio dependency.
 - `Track`-level "current value" isn't exposed for `./testing`'s `sample()`/`expectSample()` (Tween-only, documented as a stopgap).

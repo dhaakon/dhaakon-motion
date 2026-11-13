@@ -1,11 +1,8 @@
-# Rust / Wasm experimental docs
+# Rust / Wasm experimental studies
 
-Release target: `@dhaakon/motion@0.7.0-experimental.0`, private registry tag `experimental`.
-Branch: `feat/rust-wasm-engine`. Route: `/rust/experimental`.
-
-This prerelease exposes the optional engine from the first Rust migration batch.
-It does not promote Wasm to the default backend, replace browser rendering, or
-advance the stable `latest` tag. See [migration status](ENGINE-MIGRATION.md).
+The docs route `/rust/experimental` shows the optional compiled engine at work. It does not
+make Wasm the default backend or replace browser rendering. For how to use the engine in your
+own code, see [the compiled engine guide](COMPILED-ENGINE.md).
 
 ## Three studies
 
@@ -59,9 +56,9 @@ shared-memory, native scene renderer or native video export is implied.
 npm run check:all
 npm run test:wasm
 npm run test:packed-engine
-# Verify the deployed docs, without rebuilding or mutating the service:
-DOCS_URL=http://dhaakon-ubuntu:21764 node docs/scripts/verify-rust.mjs
-DOCS_URL=http://dhaakon-ubuntu:21764 npm run docs:smoke
+# Check a deployed copy of the docs without rebuilding it:
+DOCS_URL=https://motion.dhaakon.com node docs/scripts/verify-rust.mjs
+DOCS_URL=https://motion.dhaakon.com npm run docs:smoke
 ```
 
 The browser verifier checks actual Wasm bytes/MIME/hash, opt-in loading,
@@ -71,35 +68,10 @@ navigation, and callback cleanup. Screenshots and JSON reports belong in
 ignored `test-results/`. Existing SVG/MP4 decoded-image verification remains
 a separate check and the offline master is unchanged by this page.
 
-Pre-release gate passed on 2026-09-06: 353 source tests across 42 files,
-15 distribution tests, 23 Rust tests plus formatting/Clippy, 846,488
-cross-runtime comparisons, installed-package/browser checks, all 17 docs
-routes, and 12 existing decoded-media comparisons. The new page passed
-144,720 vector-channel comparisons (maximum absolute error `2.27e-13`),
-all six workload/FPS combinations, failure/retry and lifecycle checks.
-Initial JS remains 316.8 kB; the experimental page is a separate 59.5 kB
-chunk and the binary is fetched only on explicit opt-in.
+## Installing
 
-## Release workflow
-
-After successful verification, push this branch and its version tag, publish
-the prerelease only to `http://dhaakon-ubuntu:21760/` with `--tag experimental`,
-then build `Dockerfile.docs` and recreate only the Compose service
-`dhaakon-motion-docs`. The Docker image includes generated `wasm/`; nginx serves
-`.wasm` with `application/wasm` and missing binaries return 404, not the SPA HTML.
-Local compilation is not deployment. Report the successful live URL and registry
-version only after independent remote checks.
-
-> Since 0.8.0 the `/compiled` entry and its Wasm artifacts ship in the regular
-> `@dhaakon/motion` package on npm (`npm install @dhaakon/motion`); they remain
-> opt-in. The `experimental` tag below exists only on the private network registry.
-
-Install the opt-in release from the configured private registry:
-
-```sh
-npm install @dhaakon/motion@experimental
-```
-
-Consumers still explicitly import `@dhaakon/motion/compiled` and provide an
-initialized runtime for `backend: 'wasm'`. Ordinary root/React imports neither
-fetch nor initialize WebAssembly.
+Since 0.8.0 the `/compiled` entry and its Wasm artifacts ship in the regular
+`@dhaakon/motion` package on npm. They remain opt-in: you import
+`@dhaakon/motion/compiled` yourself and provide an initialized runtime for
+`backend: 'wasm'`. Ordinary root/React imports neither fetch nor initialize
+WebAssembly.

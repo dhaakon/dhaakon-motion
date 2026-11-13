@@ -1,8 +1,6 @@
 # CSS-native UI motion
 
-Status: v0.8.0 Git/docs release, developed on `feat/css-native-ui-motion`.
-The feature page is `/css-ui`. Registry publication is separate from docs deployment.
-Rust/Wasm remains opt-in and experimental; this release does not promote its backend.
+Added in 0.8.0. The live feature page is `/css-ui` on the docs site.
 
 ## Execution boundary
 

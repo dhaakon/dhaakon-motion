@@ -16,7 +16,7 @@ node --input-type=module -e 'import {cargo,run} from "./scripts/setup-rust.mjs";
 The setup command provisions Rust 1.94.1 and matching wasm-bindgen crate/CLI
 0.2.114 locally in ignored `.tools/`. It does not modify shell profiles. A native
 C linker and development headers are needed even when building Wasm proc macros.
-For the audited Ubuntu x64 host with missing `cc`, `setup-rust.mjs --local-cc`
+On an Ubuntu x64 host with no `cc`, `setup-rust.mjs --local-cc`
 extracts checksum-pinned GCC 15 packages into `.tools/host-cc`; it never installs
 system packages. That optional bootstrap requires the host's glibc development
 files and binutils. The automatic scripts are Linux x64 tooling; other operating

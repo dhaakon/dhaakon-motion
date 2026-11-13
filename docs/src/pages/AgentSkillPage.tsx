@@ -85,8 +85,7 @@ export default function AgentSkillPage() {
           <h2>Codex</h2>
           <p>
             Skills live in <code>$CODEX_HOME/skills/</code> (default <code>~/.codex</code>). Name it
-            in the prompt as <code>$dhaakon-ui-motion</code>; Codex reads each repository&rsquo;s{' '}
-            <code>AGENTS.md</code> natively.
+            in the prompt as <code>$dhaakon-ui-motion</code>.
           </p>
           <small>display name and default prompt from agents/openai.yaml</small>
         </article>

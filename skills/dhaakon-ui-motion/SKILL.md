@@ -12,8 +12,8 @@ application's architecture.
 
 ## Start with evidence
 
-1. Find the consumer and both kit repositories. Read their `AGENTS.md` files and
-   inspect the consumer's installed package versions and export maps. Source docs
+1. Find the consumer and both kit repositories. Read their READMEs and inspect the
+   consumer's installed package versions and export maps. Source docs
    can be newer than the registry package; never invent an API from a live demo.
 2. Inspect nearby screens and reuse their routing, state, data and test patterns.
 3. Check the current component registry before building a substitute. Prefer a

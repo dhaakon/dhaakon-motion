@@ -64,7 +64,6 @@ The [docs overview](https://motion.dhaakon.com) runs no demos; each feature has 
 | Personal install | `~/.claude/skills/dhaakon-ui-motion` | `$CODEX_HOME/skills/dhaakon-ui-motion` (default `~/.codex`) |
 | Per-project install | `.claude/skills/dhaakon-ui-motion` in the consumer repo | — |
 | Invoke | `/dhaakon-ui-motion …`, or automatically when the task matches | `Use $dhaakon-ui-motion to …` |
-| Repository rules | `CLAUDE.md` (imports `AGENTS.md`) | `AGENTS.md` |
 | Display metadata | `SKILL.md` frontmatter | `agents/openai.yaml` |
 
 ```sh
@@ -85,7 +84,7 @@ npm install @dhaakon/motion
 
 The core has zero runtime dependencies. **Optional peers:** `react`/`react-dom` 18+ for `/react`, and `three` for `/three` (type-only). Web Audio and Web MIDI need no npm dependency. The package ships ESM and CommonJS builds with TypeScript types for every entry point.
 
-The opt-in Rust/Wasm evaluator ships inside the package behind `@dhaakon/motion/compiled`; nothing downloads or selects Wasm unless you import it. See the [experimental demos](https://motion.dhaakon.com/rust/experimental) and [scope, lifecycle and verification notes](docs/RUST-EXPERIMENTAL.md).
+The opt-in Rust/Wasm evaluator ships inside the package behind `@dhaakon/motion/compiled`; nothing downloads or selects Wasm unless you import it. See [the compiled engine guide](docs/COMPILED-ENGINE.md) and the [experimental demos](https://motion.dhaakon.com/rust/experimental).
 
 The docs site documents the current source, which can be ahead of the latest npm release — check [the published version](https://www.npmjs.com/package/@dhaakon/motion) before relying on a newly documented API.
 
@@ -475,8 +474,7 @@ The live documentation contains the complete Three.js example, including procedu
 
 ## Development
 
-Start with [AGENTS.md](AGENTS.md), the [architecture map](docs/ARCHITECTURE.md),
-and the [audit / known limitations](docs/AUDIT.md). `saveSheet` currently loses
+Start with the [architecture map](docs/ARCHITECTURE.md). Known limitation: `saveSheet` currently loses
 some cue/region and track metadata; preserve authored JSON when fidelity matters.
 
 ```sh
@@ -538,11 +536,10 @@ Everything above 0.3 keeps working unchanged, with two documented exceptions:
 
 ## Experimental Rust / WebAssembly engine
 
-The `feat/rust-wasm-engine` branch adds an opt-in compiled Track evaluator while
-preserving the existing TypeScript/React APIs. See
-[implementation status, usage and migration notes](docs/ENGINE-MIGRATION.md)
-before using `@dhaakon/motion/compiled`. Wasm is not downloaded or selected by
-ordinary imports. The GPU renderer and native video exporter are later milestones.
+`@dhaakon/motion/compiled` adds an opt-in compiled Track evaluator while preserving the
+existing TypeScript and React APIs. Read [the compiled engine guide](docs/COMPILED-ENGINE.md)
+before using it. Wasm is not downloaded or selected by ordinary imports, and it does not
+render: a GPU renderer and a native video exporter are not part of this package.
 
 ## License
 
