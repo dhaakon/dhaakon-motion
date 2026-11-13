@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { Badge } from '@dhaakon/ui';
 import { MotionConfig } from '@dhaakon/motion/react';
+import { BrandLogo } from './components/BrandLogo';
 import { routes } from './routes';
 import { navigate, usePath } from './router';
 
@@ -75,8 +76,11 @@ export function App({ version }: { version: string }) {
           Skip to content
         </a>
         <header className="site-head">
-          <a className="wordmark" href="/">
-            <i>◇</i> DHAAKON / MOTION
+          <a className="wordmark" href="/" aria-label="Dhaakon Motion overview">
+            <BrandLogo className="wordmark__logo" />
+            <span>
+              <i>/</i> MOTION
+            </span>
           </a>
           <span className="head-caption">THE FEATURE ATLAS</span>
           <Badge tone="accent">v{version}</Badge>
@@ -148,7 +152,9 @@ export function App({ version }: { version: string }) {
               </Suspense>
             </PageErrorBoundary>
             <footer>
-              <span>◇ DHAAKON MOTION</span>
+              <span className="foot-brand">
+                <BrandLogo className="foot-brand__logo" title="Dhaakon" /> MOTION
+              </span>
               <span>MIT · TYPESCRIPT · REACT</span>
               <a href="https://github.com/dhaakon/dhaakon-motion">SOURCE ↗</a>
             </footer>

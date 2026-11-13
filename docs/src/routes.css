@@ -90,6 +90,17 @@
   gap: 20px;
   flex-wrap: wrap;
 }
+.foot-brand {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.foot-brand__logo {
+  display: block;
+  height: 34px;
+  width: auto;
+  margin-bottom: -5px;
+}
 .head-caption {
   font: 10px var(--dhk-font-mono);
   opacity: 0.6;
